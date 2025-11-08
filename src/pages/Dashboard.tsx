@@ -40,12 +40,12 @@ const Dashboard = () => {
   return (
     <div className="min-h-screen bg-gradient-hero">
       {/* Header */}
-      <div className="bg-background border-b">
-        <div className="container mx-auto px-4 py-4">
+      <div className="bg-background border-b shadow-sm">
+        <div className="container mx-auto px-4 py-4 animate-fade-in">
           <div className="flex items-center justify-between">
-            <h1 className="text-2xl font-bold">My Dashboard</h1>
+            <h1 className="text-2xl font-bold bg-gradient-primary bg-clip-text text-transparent">My Dashboard</h1>
             <Link to="/">
-              <Button variant="outline" size="sm">
+              <Button variant="outline" size="sm" className="border-2 hover:border-primary hover:bg-primary/5 transition-all duration-300">
                 Browse Courses
               </Button>
             </Link>
@@ -55,43 +55,43 @@ const Dashboard = () => {
 
       <div className="container mx-auto px-4 py-12">
         <Tabs defaultValue="sessions" className="space-y-8">
-          <TabsList>
-            <TabsTrigger value="sessions">My Sessions</TabsTrigger>
-            <TabsTrigger value="certificates">Certificates</TabsTrigger>
+          <TabsList className="animate-slide-in-left">
+            <TabsTrigger value="sessions" className="data-[state=active]:bg-gradient-primary data-[state=active]:text-primary-foreground">My Sessions</TabsTrigger>
+            <TabsTrigger value="certificates" className="data-[state=active]:bg-gradient-primary data-[state=active]:text-primary-foreground">Certificates</TabsTrigger>
           </TabsList>
 
-          <TabsContent value="sessions" className="space-y-6">
+          <TabsContent value="sessions" className="space-y-6 animate-fade-in">
             {/* Upcoming Sessions */}
             <div>
-              <h2 className="text-2xl font-bold mb-4">Upcoming Sessions</h2>
+              <h2 className="text-2xl font-bold mb-4 animate-slide-in-left">Upcoming Sessions</h2>
               <div className="grid md:grid-cols-2 gap-6">
-                {upcomingSessions.map((session) => (
-                  <Card key={session.id} className="hover:shadow-medium transition-all">
+                {upcomingSessions.map((session, index) => (
+                  <Card key={session.id} className="group hover:shadow-strong transition-all duration-500 hover:-translate-y-2 border-2 hover:border-primary/30 animate-fade-in-up" style={{ animationDelay: `${index * 0.1}s` }}>
                     <CardHeader>
                       <div className="flex items-start justify-between">
                         <div>
-                          <CardTitle className="text-lg mb-2">{session.course}</CardTitle>
+                          <CardTitle className="text-lg mb-2 group-hover:text-primary transition-colors duration-300">{session.course}</CardTitle>
                           <p className="text-sm text-muted-foreground">
                             by {session.instructor}
                           </p>
                         </div>
-                        <Badge className="bg-success text-success-foreground">Confirmed</Badge>
+                        <Badge className="bg-success text-success-foreground shadow-soft animate-pulse">Confirmed</Badge>
                       </div>
                     </CardHeader>
                     <CardContent className="space-y-4">
                       <div className="flex items-center gap-4 text-sm">
                         <div className="flex items-center gap-2 text-muted-foreground">
-                          <Calendar className="h-4 w-4" />
+                          <Calendar className="h-4 w-4 text-primary" />
                           {session.date}
                         </div>
                         <div className="flex items-center gap-2 text-muted-foreground">
-                          <Clock className="h-4 w-4" />
+                          <Clock className="h-4 w-4 text-primary" />
                           {session.time}
                         </div>
                       </div>
                       
                       <Link to={session.sessionLink}>
-                        <Button className="w-full" variant="gradient">
+                        <Button className="w-full group-hover:shadow-glow transition-all duration-300" variant="gradient">
                           <Video className="mr-2 h-4 w-4" />
                           Join Session
                         </Button>
@@ -108,10 +108,10 @@ const Dashboard = () => {
 
             {/* Past Sessions */}
             <div>
-              <h2 className="text-2xl font-bold mb-4">Completed Sessions</h2>
+              <h2 className="text-2xl font-bold mb-4 animate-slide-in-left" style={{ animationDelay: '0.2s' }}>Completed Sessions</h2>
               <div className="grid md:grid-cols-2 gap-6">
-                {completedSessions.map((session) => (
-                  <Card key={session.id}>
+                {completedSessions.map((session, index) => (
+                  <Card key={session.id} className="hover:shadow-medium transition-all duration-300 animate-fade-in-up" style={{ animationDelay: `${0.3 + index * 0.1}s` }}>
                     <CardHeader>
                       <div className="flex items-start justify-between">
                         <div>
@@ -128,7 +128,7 @@ const Dashboard = () => {
                         Completed on {session.completedDate}
                       </div>
                       
-                      <Button variant="outline" className="w-full">
+                      <Button variant="outline" className="w-full hover:border-primary hover:bg-primary/5 transition-all duration-300">
                         <Download className="mr-2 h-4 w-4" />
                         View Recording
                       </Button>
@@ -139,28 +139,30 @@ const Dashboard = () => {
             </div>
           </TabsContent>
 
-          <TabsContent value="certificates">
+          <TabsContent value="certificates" className="animate-fade-in">
             <div>
-              <h2 className="text-2xl font-bold mb-4">My Certificates</h2>
+              <h2 className="text-2xl font-bold mb-4 animate-slide-in-left">My Certificates</h2>
               <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-6">
-                {completedSessions.map((session) => (
-                  <Card key={session.id} className="hover:shadow-medium transition-all">
-                    <CardContent className="p-6">
-                      <div className="w-16 h-16 bg-gradient-primary rounded-full flex items-center justify-center mb-4 mx-auto">
-                        <Award className="h-8 w-8 text-primary-foreground" />
+                {completedSessions.map((session, index) => (
+                  <Card key={session.id} className="group hover:shadow-strong transition-all duration-500 hover:-translate-y-2 border-2 hover:border-accent/30 overflow-hidden animate-fade-in-up" style={{ animationDelay: `${index * 0.1}s` }}>
+                    <div className="absolute top-0 right-0 w-32 h-32 bg-gradient-accent opacity-5 rounded-full -mr-16 -mt-16 group-hover:scale-150 transition-transform duration-700" />
+                    
+                    <CardContent className="p-6 relative">
+                      <div className="w-16 h-16 bg-gradient-accent rounded-full flex items-center justify-center mb-4 mx-auto shadow-soft group-hover:shadow-glow group-hover:scale-110 transition-all duration-500">
+                        <Award className="h-8 w-8 text-accent-foreground" />
                       </div>
                       
-                      <h3 className="font-bold text-center mb-2">{session.course}</h3>
+                      <h3 className="font-bold text-center mb-2 group-hover:text-accent transition-colors duration-300">{session.course}</h3>
                       <p className="text-sm text-muted-foreground text-center mb-4">
                         Issued on {session.completedDate}
                       </p>
                       
                       <div className="space-y-2">
-                        <Button variant="gradient" className="w-full" size="sm">
+                        <Button variant="gradient" className="w-full shadow-medium hover:shadow-strong" size="sm">
                           <Download className="mr-2 h-4 w-4" />
                           Download Certificate
                         </Button>
-                        <Button variant="outline" className="w-full" size="sm">
+                        <Button variant="outline" className="w-full hover:border-accent hover:text-accent transition-all duration-300" size="sm">
                           Share on LinkedIn
                         </Button>
                       </div>

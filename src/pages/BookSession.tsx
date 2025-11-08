@@ -86,40 +86,43 @@ const BookSession = () => {
                   <RadioGroup value={selectedSlot} onValueChange={setSelectedSlot}>
                     <div className="space-y-3">
                       {availableSlots.map((slot) => (
-                        <div
-                          key={slot.id}
-                          className={`flex items-center justify-between p-4 rounded-lg border-2 transition-all ${
-                            !slot.available
-                              ? "opacity-50 cursor-not-allowed"
-                              : selectedSlot === slot.id
-                              ? "border-primary bg-primary/5"
-                              : "border-border hover:border-primary/50 cursor-pointer"
-                          }`}
-                        >
-                          <div className="flex items-center gap-4">
-                            <RadioGroupItem
-                              value={slot.id}
-                              id={slot.id}
-                              disabled={!slot.available}
-                            />
-                            <Label
-                              htmlFor={slot.id}
-                              className={`cursor-pointer ${!slot.available && "cursor-not-allowed"}`}
-                            >
-                              <div className="font-medium">{slot.date}</div>
-                              <div className="text-sm text-muted-foreground flex items-center gap-1 mt-1">
-                                <Clock className="h-3 w-3" />
-                                {slot.time}
-                              </div>
-                            </Label>
-                          </div>
-                          {!slot.available && (
-                            <Badge variant="secondary">Fully Booked</Badge>
-                          )}
-                          {slot.available && selectedSlot === slot.id && (
-                            <Badge className="bg-success text-success-foreground">Selected</Badge>
-                          )}
-                        </div>
+            <div className="relative group">
+              <div className="absolute -inset-0.5 bg-gradient-primary rounded-lg opacity-0 group-hover:opacity-20 blur transition-all duration-500" />
+              <Card className={`relative hover:shadow-strong transition-all duration-500 hover:-translate-y-2 border-2 ${
+                !slot.available
+                  ? "opacity-50 cursor-not-allowed"
+                  : selectedSlot === slot.id
+                  ? "border-primary bg-gradient-card shadow-medium"
+                  : "border-border hover:border-primary/50 cursor-pointer"
+              }`}>
+                <div className="flex items-center justify-between p-4">
+                  <div className="flex items-center gap-4">
+                    <RadioGroupItem
+                      value={slot.id}
+                      id={slot.id}
+                      disabled={!slot.available}
+                      className="border-2"
+                    />
+                    <Label
+                      htmlFor={slot.id}
+                      className={`cursor-pointer ${!slot.available && "cursor-not-allowed"}`}
+                    >
+                      <div className="font-medium">{slot.date}</div>
+                      <div className="text-sm text-muted-foreground flex items-center gap-1 mt-1">
+                        <Clock className="h-3 w-3" />
+                        {slot.time}
+                      </div>
+                    </Label>
+                  </div>
+                  {!slot.available && (
+                    <Badge variant="secondary" className="animate-pulse">Fully Booked</Badge>
+                  )}
+                  {slot.available && selectedSlot === slot.id && (
+                    <Badge className="bg-success text-success-foreground shadow-soft animate-scale-in">Selected</Badge>
+                  )}
+                </div>
+              </Card>
+            </div>
                       ))}
                     </div>
                   </RadioGroup>
