@@ -14,7 +14,104 @@ export type Database = {
   }
   public: {
     Tables: {
-      [_ in never]: never
+      bookings: {
+        Row: {
+          course_id: string
+          created_at: string | null
+          id: string
+          payment_status: string | null
+          session_date: string
+          session_time: string
+          status: string | null
+          user_id: string
+        }
+        Insert: {
+          course_id: string
+          created_at?: string | null
+          id?: string
+          payment_status?: string | null
+          session_date: string
+          session_time: string
+          status?: string | null
+          user_id: string
+        }
+        Update: {
+          course_id?: string
+          created_at?: string | null
+          id?: string
+          payment_status?: string | null
+          session_date?: string
+          session_time?: string
+          status?: string | null
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "bookings_course_id_fkey"
+            columns: ["course_id"]
+            isOneToOne: false
+            referencedRelation: "courses"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      courses: {
+        Row: {
+          created_at: string | null
+          description: string | null
+          duration: string
+          id: string
+          image_url: string | null
+          instructor: string
+          price: number
+          title: string
+        }
+        Insert: {
+          created_at?: string | null
+          description?: string | null
+          duration: string
+          id?: string
+          image_url?: string | null
+          instructor: string
+          price: number
+          title: string
+        }
+        Update: {
+          created_at?: string | null
+          description?: string | null
+          duration?: string
+          id?: string
+          image_url?: string | null
+          instructor?: string
+          price?: number
+          title?: string
+        }
+        Relationships: []
+      }
+      profiles: {
+        Row: {
+          created_at: string | null
+          email: string | null
+          full_name: string | null
+          id: string
+          updated_at: string | null
+        }
+        Insert: {
+          created_at?: string | null
+          email?: string | null
+          full_name?: string | null
+          id: string
+          updated_at?: string | null
+        }
+        Update: {
+          created_at?: string | null
+          email?: string | null
+          full_name?: string | null
+          id?: string
+          updated_at?: string | null
+        }
+        Relationships: []
+      }
     }
     Views: {
       [_ in never]: never
