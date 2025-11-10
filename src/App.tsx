@@ -11,6 +11,7 @@ import LiveSession from "./pages/LiveSession";
 import Auth from "./pages/Auth";
 import RequestSession from "./pages/RequestSession";
 import NotFound from "./pages/NotFound";
+import AdminPanel from "./pages/AdminPanel";
 import { ProtectedRoute } from "./components/ProtectedRoute";
 
 const queryClient = new QueryClient();
@@ -24,6 +25,7 @@ const App = () => (
         <Routes>
           <Route path="/" element={<Index />} />
           <Route path="/auth" element={<Auth />} />
+          <Route path="/admin" element={<ProtectedRoute><AdminPanel /></ProtectedRoute>} />
           <Route path="/course/:id" element={<ProtectedRoute><CourseDetail /></ProtectedRoute>} />
           <Route path="/book/:id" element={<ProtectedRoute><BookSession /></ProtectedRoute>} />
           <Route path="/dashboard" element={<ProtectedRoute><Dashboard /></ProtectedRoute>} />
