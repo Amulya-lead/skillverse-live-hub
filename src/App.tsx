@@ -11,6 +11,7 @@ import LiveSession from "./pages/LiveSession";
 import Auth from "./pages/Auth";
 import RequestSession from "./pages/RequestSession";
 import NotFound from "./pages/NotFound";
+import { ProtectedRoute } from "./components/ProtectedRoute";
 
 const queryClient = new QueryClient();
 
@@ -22,12 +23,12 @@ const App = () => (
       <BrowserRouter>
         <Routes>
           <Route path="/" element={<Index />} />
-          <Route path="/course/:id" element={<CourseDetail />} />
-          <Route path="/book/:id" element={<BookSession />} />
-          <Route path="/dashboard" element={<Dashboard />} />
-          <Route path="/session/:id" element={<LiveSession />} />
           <Route path="/auth" element={<Auth />} />
-          <Route path="/request-session" element={<RequestSession />} />
+          <Route path="/course/:id" element={<ProtectedRoute><CourseDetail /></ProtectedRoute>} />
+          <Route path="/book/:id" element={<ProtectedRoute><BookSession /></ProtectedRoute>} />
+          <Route path="/dashboard" element={<ProtectedRoute><Dashboard /></ProtectedRoute>} />
+          <Route path="/session/:id" element={<ProtectedRoute><LiveSession /></ProtectedRoute>} />
+          <Route path="/request-session" element={<ProtectedRoute><RequestSession /></ProtectedRoute>} />
           {/* ADD ALL CUSTOM ROUTES ABOVE THE CATCH-ALL "*" ROUTE */}
           <Route path="*" element={<NotFound />} />
         </Routes>

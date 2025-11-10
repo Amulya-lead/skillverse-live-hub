@@ -5,6 +5,7 @@ import { Link } from "react-router-dom";
 import HeroSection from "@/components/HeroSection";
 import CourseCard from "@/components/CourseCard";
 import FeatureCard from "@/components/FeatureCard";
+import { Navbar } from "@/components/Navbar";
 
 const courses = [
   {
@@ -89,6 +90,7 @@ const features = [
 const Index = () => {
   return (
     <div className="min-h-screen bg-gradient-hero">
+      <Navbar />
       <HeroSection />
       
       {/* Features Section */}
