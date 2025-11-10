@@ -55,6 +55,79 @@ export type Database = {
           },
         ]
       }
+      chat_messages: {
+        Row: {
+          created_at: string | null
+          id: string
+          message: string
+          message_type: string | null
+          session_id: string
+          user_id: string
+        }
+        Insert: {
+          created_at?: string | null
+          id?: string
+          message: string
+          message_type?: string | null
+          session_id: string
+          user_id: string
+        }
+        Update: {
+          created_at?: string | null
+          id?: string
+          message?: string
+          message_type?: string | null
+          session_id?: string
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "chat_messages_session_id_fkey"
+            columns: ["session_id"]
+            isOneToOne: false
+            referencedRelation: "live_sessions"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      code_snippets: {
+        Row: {
+          code: string
+          created_at: string | null
+          id: string
+          language: string | null
+          output: string | null
+          session_id: string
+          user_id: string
+        }
+        Insert: {
+          code: string
+          created_at?: string | null
+          id?: string
+          language?: string | null
+          output?: string | null
+          session_id: string
+          user_id: string
+        }
+        Update: {
+          code?: string
+          created_at?: string | null
+          id?: string
+          language?: string | null
+          output?: string | null
+          session_id?: string
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "code_snippets_session_id_fkey"
+            columns: ["session_id"]
+            isOneToOne: false
+            referencedRelation: "live_sessions"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       courses: {
         Row: {
           created_at: string | null
@@ -88,6 +161,77 @@ export type Database = {
         }
         Relationships: []
       }
+      live_sessions: {
+        Row: {
+          actual_end: string | null
+          actual_start: string | null
+          chat_enabled: boolean | null
+          course_id: string | null
+          created_at: string | null
+          current_participants: number | null
+          description: string | null
+          id: string
+          instructor_id: string
+          max_participants: number | null
+          mute_all: boolean | null
+          recording_url: string | null
+          scheduled_end: string
+          scheduled_start: string
+          session_link: string | null
+          status: string | null
+          title: string
+          updated_at: string | null
+        }
+        Insert: {
+          actual_end?: string | null
+          actual_start?: string | null
+          chat_enabled?: boolean | null
+          course_id?: string | null
+          created_at?: string | null
+          current_participants?: number | null
+          description?: string | null
+          id?: string
+          instructor_id: string
+          max_participants?: number | null
+          mute_all?: boolean | null
+          recording_url?: string | null
+          scheduled_end: string
+          scheduled_start: string
+          session_link?: string | null
+          status?: string | null
+          title: string
+          updated_at?: string | null
+        }
+        Update: {
+          actual_end?: string | null
+          actual_start?: string | null
+          chat_enabled?: boolean | null
+          course_id?: string | null
+          created_at?: string | null
+          current_participants?: number | null
+          description?: string | null
+          id?: string
+          instructor_id?: string
+          max_participants?: number | null
+          mute_all?: boolean | null
+          recording_url?: string | null
+          scheduled_end?: string
+          scheduled_start?: string
+          session_link?: string | null
+          status?: string | null
+          title?: string
+          updated_at?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "live_sessions_course_id_fkey"
+            columns: ["course_id"]
+            isOneToOne: false
+            referencedRelation: "courses"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       profiles: {
         Row: {
           created_at: string | null
@@ -112,15 +256,186 @@ export type Database = {
         }
         Relationships: []
       }
+      session_notes: {
+        Row: {
+          content: string | null
+          id: string
+          session_id: string
+          updated_at: string | null
+          user_id: string
+        }
+        Insert: {
+          content?: string | null
+          id?: string
+          session_id: string
+          updated_at?: string | null
+          user_id: string
+        }
+        Update: {
+          content?: string | null
+          id?: string
+          session_id?: string
+          updated_at?: string | null
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "session_notes_session_id_fkey"
+            columns: ["session_id"]
+            isOneToOne: false
+            referencedRelation: "live_sessions"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      session_participants: {
+        Row: {
+          audio_enabled: boolean | null
+          id: string
+          joined_at: string | null
+          left_at: string | null
+          session_id: string
+          status: string | null
+          user_id: string
+          video_enabled: boolean | null
+        }
+        Insert: {
+          audio_enabled?: boolean | null
+          id?: string
+          joined_at?: string | null
+          left_at?: string | null
+          session_id: string
+          status?: string | null
+          user_id: string
+          video_enabled?: boolean | null
+        }
+        Update: {
+          audio_enabled?: boolean | null
+          id?: string
+          joined_at?: string | null
+          left_at?: string | null
+          session_id?: string
+          status?: string | null
+          user_id?: string
+          video_enabled?: boolean | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "session_participants_session_id_fkey"
+            columns: ["session_id"]
+            isOneToOne: false
+            referencedRelation: "live_sessions"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      session_recordings: {
+        Row: {
+          available_until: string | null
+          created_at: string | null
+          duration: number | null
+          file_size: number | null
+          id: string
+          recording_url: string
+          session_id: string
+        }
+        Insert: {
+          available_until?: string | null
+          created_at?: string | null
+          duration?: number | null
+          file_size?: number | null
+          id?: string
+          recording_url: string
+          session_id: string
+        }
+        Update: {
+          available_until?: string | null
+          created_at?: string | null
+          duration?: number | null
+          file_size?: number | null
+          id?: string
+          recording_url?: string
+          session_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "session_recordings_session_id_fkey"
+            columns: ["session_id"]
+            isOneToOne: false
+            referencedRelation: "live_sessions"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      user_roles: {
+        Row: {
+          created_at: string | null
+          id: string
+          role: Database["public"]["Enums"]["app_role"]
+          user_id: string
+        }
+        Insert: {
+          created_at?: string | null
+          id?: string
+          role: Database["public"]["Enums"]["app_role"]
+          user_id: string
+        }
+        Update: {
+          created_at?: string | null
+          id?: string
+          role?: Database["public"]["Enums"]["app_role"]
+          user_id?: string
+        }
+        Relationships: []
+      }
+      user_settings: {
+        Row: {
+          default_audio_enabled: boolean | null
+          default_video_enabled: boolean | null
+          id: string
+          language: string | null
+          notifications_enabled: boolean | null
+          theme: string | null
+          updated_at: string | null
+          user_id: string
+        }
+        Insert: {
+          default_audio_enabled?: boolean | null
+          default_video_enabled?: boolean | null
+          id?: string
+          language?: string | null
+          notifications_enabled?: boolean | null
+          theme?: string | null
+          updated_at?: string | null
+          user_id: string
+        }
+        Update: {
+          default_audio_enabled?: boolean | null
+          default_video_enabled?: boolean | null
+          id?: string
+          language?: string | null
+          notifications_enabled?: boolean | null
+          theme?: string | null
+          updated_at?: string | null
+          user_id?: string
+        }
+        Relationships: []
+      }
     }
     Views: {
       [_ in never]: never
     }
     Functions: {
-      [_ in never]: never
+      has_role: {
+        Args: {
+          _role: Database["public"]["Enums"]["app_role"]
+          _user_id: string
+        }
+        Returns: boolean
+      }
     }
     Enums: {
-      [_ in never]: never
+      app_role: "admin" | "instructor" | "student"
     }
     CompositeTypes: {
       [_ in never]: never
@@ -247,6 +562,8 @@ export type CompositeTypes<
 
 export const Constants = {
   public: {
-    Enums: {},
+    Enums: {
+      app_role: ["admin", "instructor", "student"],
+    },
   },
 } as const
