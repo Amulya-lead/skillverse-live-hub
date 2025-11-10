@@ -12,6 +12,10 @@ import Auth from "./pages/Auth";
 import RequestSession from "./pages/RequestSession";
 import NotFound from "./pages/NotFound";
 import AdminPanel from "./pages/AdminPanel";
+import AdminDashboard from "./pages/AdminDashboard";
+import Courses from "./pages/Courses";
+import About from "./pages/About";
+import Contact from "./pages/Contact";
 import { ProtectedRoute } from "./components/ProtectedRoute";
 
 const queryClient = new QueryClient();
@@ -25,7 +29,11 @@ const App = () => (
         <Routes>
           <Route path="/" element={<Index />} />
           <Route path="/auth" element={<Auth />} />
+          <Route path="/courses" element={<Courses />} />
+          <Route path="/about" element={<About />} />
+          <Route path="/contact" element={<Contact />} />
           <Route path="/admin" element={<ProtectedRoute><AdminPanel /></ProtectedRoute>} />
+          <Route path="/admin/dashboard" element={<ProtectedRoute><AdminDashboard /></ProtectedRoute>} />
           <Route path="/course/:id" element={<ProtectedRoute><CourseDetail /></ProtectedRoute>} />
           <Route path="/book/:id" element={<ProtectedRoute><BookSession /></ProtectedRoute>} />
           <Route path="/dashboard" element={<ProtectedRoute><Dashboard /></ProtectedRoute>} />

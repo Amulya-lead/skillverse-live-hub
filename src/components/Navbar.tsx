@@ -16,20 +16,40 @@ export const Navbar = () => {
   const navigate = useNavigate();
   const { toast } = useToast();
   const [user, setUser] = useState<any>(null);
+  const [isAdmin, setIsAdmin] = useState(false);
 
   useEffect(() => {
     supabase.auth.getSession().then(({ data: { session } }) => {
       setUser(session?.user ?? null);
+      if (session?.user) {
+        checkAdminRole(session.user.id);
+      }
     });
 
     const { data: { subscription } } = supabase.auth.onAuthStateChange(
       (_event, session) => {
         setUser(session?.user ?? null);
+        if (session?.user) {
+          checkAdminRole(session.user.id);
+        } else {
+          setIsAdmin(false);
+        }
       }
     );
 
     return () => subscription.unsubscribe();
   }, []);
+
+  const checkAdminRole = async (userId: string) => {
+    const { data } = await supabase
+      .from("user_roles")
+      .select("role")
+      .eq("user_id", userId)
+      .in("role", ["admin", "instructor"])
+      .maybeSingle();
+    
+    setIsAdmin(!!data);
+  };
 
   const handleLogout = async () => {
     const { error } = await supabase.auth.signOut();
@@ -62,13 +82,13 @@ export const Navbar = () => {
           <Link to="/">
             <Button variant="ghost">Home</Button>
           </Link>
-          <Link to="/">
+          <Link to="/courses">
             <Button variant="ghost">Courses</Button>
           </Link>
-          <Link to="/">
+          <Link to="/about">
             <Button variant="ghost">About</Button>
           </Link>
-          <Link to="/">
+          <Link to="/contact">
             <Button variant="ghost">Contact</Button>
           </Link>
           
@@ -83,6 +103,11 @@ export const Navbar = () => {
                 <DropdownMenuItem onClick={() => navigate("/dashboard")}>
                   Dashboard
                 </DropdownMenuItem>
+                {isAdmin && (
+                  <DropdownMenuItem onClick={() => navigate("/admin/dashboard")}>
+                    Admin Dashboard
+                  </DropdownMenuItem>
+                )}
                 <DropdownMenuSeparator />
                 <DropdownMenuItem onClick={handleLogout}>
                   <LogOut className="h-4 w-4 mr-2" />
