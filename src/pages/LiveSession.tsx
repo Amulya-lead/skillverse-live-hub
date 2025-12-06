@@ -99,6 +99,57 @@ class Dog extends Animal {
     notificationsEnabled: true,
   });
 
+  // Initialize camera and microphone first
+  useEffect(() => {
+    const initMedia = async () => {
+      try {
+        const mediaStream = await navigator.mediaDevices.getUserMedia({
+          video: true,
+          audio: true
+        });
+        
+        setStream(mediaStream);
+        
+        // Set video mute states based on settings
+        mediaStream.getAudioTracks().forEach(track => {
+          track.enabled = userSettings.defaultAudioEnabled;
+        });
+        mediaStream.getVideoTracks().forEach(track => {
+          track.enabled = userSettings.defaultVideoEnabled;
+        });
+        
+        setIsMuted(!userSettings.defaultAudioEnabled);
+        setIsVideoOff(!userSettings.defaultVideoEnabled);
+
+        toast({
+          title: "Camera & Microphone Connected",
+          description: "Your devices are ready for the session",
+        });
+      } catch (error) {
+        console.error("Media access error:", error);
+        toast({
+          title: "Media Access Denied",
+          description: "Please allow camera and microphone access to join the session",
+          variant: "destructive",
+        });
+      }
+    };
+
+    initMedia();
+
+    return () => {
+      // Cleanup media on unmount
+    };
+  }, []);
+
+  // Connect stream to video element whenever stream changes
+  useEffect(() => {
+    if (stream && videoRef.current) {
+      videoRef.current.srcObject = stream;
+      videoRef.current.play().catch(console.error);
+    }
+  }, [stream]);
+
   useEffect(() => {
     const initSession = async () => {
       try {
@@ -115,7 +166,7 @@ class Dog extends Animal {
           .from("live_sessions")
           .select("*")
           .eq("id", id)
-          .single();
+          .maybeSingle();
 
         if (sessionError || !sessionData) {
           toast({
@@ -171,34 +222,6 @@ class Dog extends Animal {
     };
 
     initSession();
-    
-    // Initialize camera and microphone
-    const initMedia = async () => {
-      try {
-        const mediaStream = await navigator.mediaDevices.getUserMedia({
-          video: userSettings.defaultVideoEnabled,
-          audio: userSettings.defaultAudioEnabled
-        });
-        
-        setStream(mediaStream);
-        if (videoRef.current) {
-          videoRef.current.srcObject = mediaStream;
-        }
-
-        toast({
-          title: "Camera & Microphone Connected",
-          description: "Your devices are ready for the session",
-        });
-      } catch (error) {
-        toast({
-          title: "Media Access Denied",
-          description: "Please allow camera and microphone access",
-          variant: "destructive",
-        });
-      }
-    };
-
-    initMedia();
 
     // Subscribe to real-time chat messages
     const chatChannel = supabase
@@ -235,12 +258,17 @@ class Dog extends Animal {
       .subscribe();
 
     return () => {
-      // Cleanup
+      chatChannel.unsubscribe();
+      participantsChannel.unsubscribe();
+    };
+  }, [id]);
+
+  // Cleanup stream on unmount
+  useEffect(() => {
+    return () => {
       if (stream) {
         stream.getTracks().forEach(track => track.stop());
       }
-      chatChannel.unsubscribe();
-      participantsChannel.unsubscribe();
       
       // Mark as left
       if (currentUserId && id) {
@@ -252,7 +280,7 @@ class Dog extends Animal {
           .then();
       }
     };
-  }, [id]);
+  }, [stream, currentUserId, id]);
 
   // Auto-save notes every 5 seconds
   useEffect(() => {
