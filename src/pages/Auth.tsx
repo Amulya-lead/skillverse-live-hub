@@ -21,7 +21,7 @@ const Auth = () => {
     // Check if user is already logged in
     supabase.auth.getSession().then(({ data: { session } }) => {
       if (session) {
-        navigate("/dashboard");
+        navigate("/courses");
       }
     });
   }, [navigate]);
@@ -43,7 +43,7 @@ const Auth = () => {
         description: "Welcome back to SkillVerse!",
       });
       
-      navigate("/dashboard");
+      navigate("/courses");
     } catch (error: any) {
       toast({
         title: "Login Failed",
@@ -78,7 +78,7 @@ const Auth = () => {
         description: "Your account has been created. Welcome to SkillVerse!",
       });
       
-      navigate("/dashboard");
+      navigate("/courses");
     } catch (error: any) {
       toast({
         title: "Signup Failed",
