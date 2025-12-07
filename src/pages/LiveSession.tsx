@@ -186,6 +186,25 @@ const LiveSession = () => {
         }
         setCurrentUserId(user.id);
 
+        // Check if user has admin or instructor role
+        const { data: roleData } = await supabase
+          .from("user_roles")
+          .select("role")
+          .eq("user_id", user.id)
+          .in("role", ["admin", "instructor"]);
+
+        const hasAdminAccess = roleData && roleData.length > 0;
+
+        if (!hasAdminAccess) {
+          toast({
+            title: "Access Denied",
+            description: "Only admins and instructors can conduct live sessions",
+            variant: "destructive",
+          });
+          navigate("/dashboard");
+          return;
+        }
+
         const { data: sessionData, error: sessionError } = await supabase
           .from("live_sessions")
           .select("*")
