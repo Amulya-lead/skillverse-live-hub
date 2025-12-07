@@ -1,1 +1,10 @@
 project_id = "cklgsjulvimzvxucevmb"
+
+[functions.ai-tutor]
+verify_jwt = false
+
+[functions.run-code]
+verify_jwt = false
+
+[functions.send-booking-confirmation]
+verify_jwt = false
