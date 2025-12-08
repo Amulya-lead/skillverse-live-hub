@@ -58,6 +58,10 @@ interface SessionParticipant {
   audio_enabled: boolean;
   video_enabled: boolean;
   status: string;
+  profile?: {
+    full_name: string | null;
+    email: string | null;
+  };
 }
 
 interface LiveSessionData {
@@ -389,7 +393,23 @@ const LiveSession = () => {
       .eq("status", "active");
 
     if (!error && data) {
-      setParticipants(data);
+      // Fetch profiles for participants
+      const userIds = data.map(p => p.user_id);
+      const { data: profilesData } = await supabase
+        .from("profiles")
+        .select("id, full_name, email")
+        .in("id", userIds);
+
+      const profilesMap = new Map(
+        profilesData?.map(p => [p.id, { full_name: p.full_name, email: p.email }]) || []
+      );
+
+      const participantsWithProfiles = data.map(p => ({
+        ...p,
+        profile: profilesMap.get(p.user_id) || { full_name: null, email: null }
+      }));
+
+      setParticipants(participantsWithProfiles);
       setParticipantCount(data.length);
     }
   };
@@ -728,6 +748,55 @@ const LiveSession = () => {
               </div>
             )}
           </Card>
+
+          {/* Enrolled Students Panel - Only for Instructors */}
+          {isInstructor && (
+            <Card className="p-4 bg-card/80 backdrop-blur-sm border-primary/20">
+              <div className="flex items-center justify-between mb-3">
+                <h3 className="font-medium text-sm flex items-center gap-2">
+                  <Users className="h-4 w-4 text-primary" />
+                  Enrolled Students
+                  <Badge variant="secondary" className="text-xs">{participantCount}</Badge>
+                </h3>
+              </div>
+              <ScrollArea className="h-32">
+                <div className="space-y-2">
+                  {participants.filter(p => p.user_id !== currentUserId).length === 0 ? (
+                    <p className="text-xs text-muted-foreground text-center py-4">No students have joined yet</p>
+                  ) : (
+                    participants.filter(p => p.user_id !== currentUserId).map((participant) => (
+                      <div 
+                        key={participant.id} 
+                        className="flex items-center justify-between p-2 bg-muted/30 rounded-lg"
+                      >
+                        <div className="flex items-center gap-2">
+                          <div className="w-8 h-8 rounded-full bg-primary/20 flex items-center justify-center text-xs font-medium text-primary">
+                            {participant.profile?.full_name?.[0]?.toUpperCase() || 'S'}
+                          </div>
+                          <div>
+                            <p className="text-sm font-medium">{participant.profile?.full_name || 'Student'}</p>
+                            <p className="text-xs text-muted-foreground">{participant.profile?.email || 'No email'}</p>
+                          </div>
+                        </div>
+                        <div className="flex items-center gap-1">
+                          {participant.audio_enabled ? (
+                            <Mic className="h-3 w-3 text-success" />
+                          ) : (
+                            <MicOff className="h-3 w-3 text-muted-foreground" />
+                          )}
+                          {participant.video_enabled ? (
+                            <Video className="h-3 w-3 text-success" />
+                          ) : (
+                            <VideoOff className="h-3 w-3 text-muted-foreground" />
+                          )}
+                        </div>
+                      </div>
+                    ))
+                  )}
+                </div>
+              </ScrollArea>
+            </Card>
+          )}
 
           {/* Notepad */}
           <Card className="flex-1 p-4 flex flex-col bg-card/80 backdrop-blur-sm">

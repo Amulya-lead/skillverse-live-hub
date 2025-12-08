@@ -3,11 +3,17 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { useParams, Link, useNavigate } from "react-router-dom";
-import { ArrowLeft, Calendar, Clock, CreditCard, Sparkles, CheckCircle2, Mail, Shield, Zap } from "lucide-react";
+import { ArrowLeft, Calendar, Clock, CreditCard, Sparkles, CheckCircle2, Mail, Shield, Zap, Loader2 } from "lucide-react";
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
 import { Label } from "@/components/ui/label";
 import { useToast } from "@/hooks/use-toast";
 import { supabase } from "@/integrations/supabase/client";
+
+declare global {
+  interface Window {
+    Razorpay: any;
+  }
+}
 
 const BookSession = () => {
   const { id } = useParams();
@@ -17,11 +23,15 @@ const BookSession = () => {
   const [isBooking, setIsBooking] = useState(false);
   const [userEmail, setUserEmail] = useState("");
   const [userName, setUserName] = useState("");
+  const [userId, setUserId] = useState("");
+  const [razorpayLoaded, setRazorpayLoaded] = useState(false);
 
   // Mock data - would come from API
   const course = {
+    id: id || "course-1",
     title: "4 Hours of OOPS in Java",
-    price: "₹999",
+    price: 999,
+    priceDisplay: "₹999",
     instructor: "Rahul Sharma",
   };
 
@@ -35,11 +45,25 @@ const BookSession = () => {
   ];
 
   useEffect(() => {
+    // Load Razorpay script
+    const script = document.createElement("script");
+    script.src = "https://checkout.razorpay.com/v1/checkout.js";
+    script.async = true;
+    script.onload = () => setRazorpayLoaded(true);
+    document.body.appendChild(script);
+
+    return () => {
+      document.body.removeChild(script);
+    };
+  }, []);
+
+  useEffect(() => {
     const fetchUserDetails = async () => {
       const { data: { user } } = await supabase.auth.getUser();
       if (user) {
         setUserEmail(user.email || "");
         setUserName(user.user_metadata?.full_name || user.email?.split("@")[0] || "");
+        setUserId(user.id);
       }
     };
     fetchUserDetails();
@@ -59,47 +83,132 @@ const BookSession = () => {
     const selectedSlotData = availableSlots.find(s => s.id === selectedSlot);
 
     try {
-      // Send booking confirmation email
-      const { data, error } = await supabase.functions.invoke("send-booking-confirmation", {
+      // Create Razorpay order
+      const { data: orderData, error: orderError } = await supabase.functions.invoke("create-razorpay-order", {
         body: {
-          userEmail,
-          userName,
+          amount: course.price,
+          currency: "INR",
+          courseId: course.id,
           courseName: course.title,
-          instructor: course.instructor,
+          userId: userId,
+          userEmail: userEmail,
           sessionDate: selectedSlotData?.date || "",
           sessionTime: selectedSlotData?.time || "",
-          price: course.price,
         },
       });
 
-      if (error) {
-        console.error("Email error:", error);
-        toast({
-          title: "Booking Confirmed! 🎉",
-          description: "Your session is booked. Email confirmation may be delayed.",
-        });
-      } else {
-        toast({
-          title: "Booking Confirmed! 🎉",
-          description: "Check your email for confirmation and session details",
-        });
+      if (orderError || !orderData?.configured) {
+        // Fallback: Book without payment if Razorpay not configured
+        console.log("Razorpay not configured, proceeding with direct booking");
+        await completeBookingWithoutPayment(selectedSlotData);
+        return;
       }
-      
-      setTimeout(() => {
-        navigate("/dashboard");
-      }, 2000);
+
+      // Open Razorpay checkout
+      const options = {
+        key: orderData.keyId,
+        amount: orderData.amount,
+        currency: orderData.currency,
+        name: "SkillVerse",
+        description: course.title,
+        order_id: orderData.orderId,
+        handler: async function (response: any) {
+          // Verify payment
+          const { data: verifyData, error: verifyError } = await supabase.functions.invoke("verify-razorpay-payment", {
+            body: {
+              razorpay_order_id: response.razorpay_order_id,
+              razorpay_payment_id: response.razorpay_payment_id,
+              razorpay_signature: response.razorpay_signature,
+              courseId: course.id,
+              userId: userId,
+              sessionDate: selectedSlotData?.date || "",
+              sessionTime: selectedSlotData?.time || "",
+            },
+          });
+
+          if (verifyError || !verifyData?.verified) {
+            toast({
+              title: "Payment Verification Failed",
+              description: "Please contact support if amount was deducted.",
+              variant: "destructive",
+            });
+            setIsBooking(false);
+            return;
+          }
+
+          // Send confirmation email
+          await sendConfirmationEmail(selectedSlotData);
+          
+          toast({
+            title: "Payment Successful! 🎉",
+            description: "Your session has been booked. Check your email for details.",
+          });
+          
+          setTimeout(() => navigate("/dashboard"), 2000);
+        },
+        prefill: {
+          name: userName,
+          email: userEmail,
+        },
+        theme: {
+          color: "#8b5cf6",
+        },
+        modal: {
+          ondismiss: function() {
+            setIsBooking(false);
+          }
+        }
+      };
+
+      if (window.Razorpay) {
+        const rzp = new window.Razorpay(options);
+        rzp.open();
+      } else {
+        throw new Error("Razorpay not loaded");
+      }
     } catch (error) {
       console.error("Booking error:", error);
+      toast({
+        title: "Error",
+        description: "Something went wrong. Please try again.",
+        variant: "destructive",
+      });
+      setIsBooking(false);
+    }
+  };
+
+  const completeBookingWithoutPayment = async (selectedSlotData: any) => {
+    try {
+      await sendConfirmationEmail(selectedSlotData);
+      toast({
+        title: "Booking Confirmed! 🎉",
+        description: "Check your email for confirmation and session details",
+      });
+      setTimeout(() => navigate("/dashboard"), 2000);
+    } catch (error) {
+      console.error("Error:", error);
       toast({
         title: "Booking Confirmed! 🎉",
         description: "Session booked successfully!",
       });
-      setTimeout(() => {
-        navigate("/dashboard");
-      }, 2000);
+      setTimeout(() => navigate("/dashboard"), 2000);
     } finally {
       setIsBooking(false);
     }
+  };
+
+  const sendConfirmationEmail = async (selectedSlotData: any) => {
+    await supabase.functions.invoke("send-booking-confirmation", {
+      body: {
+        userEmail,
+        userName,
+        courseName: course.title,
+        instructor: course.instructor,
+        sessionDate: selectedSlotData?.date || "",
+        sessionTime: selectedSlotData?.time || "",
+        price: course.priceDisplay,
+      },
+    });
   };
 
   return (

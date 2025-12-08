@@ -138,6 +138,9 @@ const handler = async (req: Request): Promise<Response> => {
       </html>
     `;
 
+    // Get custom email domain from env or use default
+    const EMAIL_FROM = Deno.env.get("EMAIL_FROM_ADDRESS") || "SkillVerse <noreply@yourdomain.com>";
+    
     const res = await fetch("https://api.resend.com/emails", {
       method: "POST",
       headers: {
@@ -145,7 +148,7 @@ const handler = async (req: Request): Promise<Response> => {
         Authorization: `Bearer ${RESEND_API_KEY}`,
       },
       body: JSON.stringify({
-        from: "SkillVerse <onboarding@resend.dev>",
+        from: EMAIL_FROM,
         to: [userEmail],
         subject: "🎉 Your Session is Booked! - SkillVerse",
         html: emailHtml,

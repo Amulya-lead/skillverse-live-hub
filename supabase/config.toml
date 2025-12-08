@@ -8,3 +8,9 @@ verify_jwt = false
 
 [functions.send-booking-confirmation]
 verify_jwt = false
+
+[functions.create-razorpay-order]
+verify_jwt = false
+
+[functions.verify-razorpay-payment]
+verify_jwt = false
