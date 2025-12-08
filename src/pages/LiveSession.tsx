@@ -83,6 +83,7 @@ const LiveSession = () => {
   const [loading, setLoading] = useState(true);
   const [session, setSession] = useState<LiveSessionData | null>(null);
   const [isInstructor, setIsInstructor] = useState(false);
+  const [isViewer, setIsViewer] = useState(false); // Students join as viewers
   const [currentUserId, setCurrentUserId] = useState<string>("");
   
   const [isMuted, setIsMuted] = useState(false);
@@ -111,7 +112,7 @@ const LiveSession = () => {
   
   // AI Chatbot states
   const [aiMessages, setAiMessages] = useState<AIChatMessage[]>([
-    { role: 'assistant', content: 'Hi! I\'m your AI tutor. Ask me anything about programming, and I\'ll help you understand! 🚀' }
+    { role: 'assistant', content: '👋 Hi! I\'m your AI programming tutor. I can help you with:\n\n• **Code explanations** - Understand any code snippet\n• **Debugging** - Find and fix errors\n• **Concepts** - Learn programming fundamentals\n• **Best practices** - Write cleaner code\n\nWhat would you like to learn today?' }
   ]);
   const [aiInput, setAiInput] = useState("");
   const [isAiLoading, setIsAiLoading] = useState(false);
@@ -122,27 +123,45 @@ const LiveSession = () => {
     notificationsEnabled: true,
   });
 
-  // Initialize camera and microphone
+  // Initialize camera and microphone - only for instructors
   useEffect(() => {
+    // Wait for role check to complete
+    if (loading) return;
+    
+    // Only instructors get video/audio access
+    if (isViewer) {
+      console.log("Viewer mode - no media access needed");
+      return;
+    }
+    
     const initMedia = async () => {
       try {
-        console.log("Requesting media access...");
+        console.log("Requesting media access for instructor...");
         const mediaStream = await navigator.mediaDevices.getUserMedia({
-          video: { width: 1280, height: 720, facingMode: "user" },
-          audio: true
+          video: { 
+            width: { ideal: 1280 }, 
+            height: { ideal: 720 }, 
+            facingMode: "user" 
+          },
+          audio: {
+            echoCancellation: true,
+            noiseSuppression: true,
+            autoGainControl: true
+          }
         });
         
         console.log("Media stream obtained:", mediaStream.getTracks());
         setStream(mediaStream);
         
-        // Immediately connect to video element
-        if (videoRef.current) {
-          videoRef.current.srcObject = mediaStream;
-          videoRef.current.onloadedmetadata = () => {
-            console.log("Video metadata loaded");
-            videoRef.current?.play().catch(e => console.error("Play error:", e));
-          };
-        }
+        // Connect to video element after a short delay to ensure DOM is ready
+        setTimeout(() => {
+          if (videoRef.current && mediaStream) {
+            videoRef.current.srcObject = mediaStream;
+            videoRef.current.muted = true; // Mute local playback to avoid echo
+            videoRef.current.play().catch(e => console.error("Play error:", e));
+            console.log("Video connected to element");
+          }
+        }, 100);
 
         toast({
           title: "Camera & Microphone Connected",
@@ -152,7 +171,7 @@ const LiveSession = () => {
         console.error("Media access error:", error);
         toast({
           title: "Media Access Denied",
-          description: "Please allow camera and microphone access to join the session",
+          description: "Please allow camera and microphone access to conduct the session",
           variant: "destructive",
         });
       }
@@ -163,7 +182,7 @@ const LiveSession = () => {
     return () => {
       // Cleanup handled in separate effect
     };
-  }, []);
+  }, [loading, isViewer]);
 
   // Reconnect stream to video element when stream changes
   useEffect(() => {
@@ -195,16 +214,7 @@ const LiveSession = () => {
 
         const hasAdminAccess = roleData && roleData.length > 0;
 
-        if (!hasAdminAccess) {
-          toast({
-            title: "Access Denied",
-            description: "Only admins and instructors can conduct live sessions",
-            variant: "destructive",
-          });
-          navigate("/dashboard");
-          return;
-        }
-
+        // Get session data first
         const { data: sessionData, error: sessionError } = await supabase
           .from("live_sessions")
           .select("*")
@@ -222,7 +232,18 @@ const LiveSession = () => {
         }
 
         setSession(sessionData);
-        setIsInstructor(sessionData.instructor_id === user.id);
+        
+        // Determine role: instructor or viewer (student)
+        const isSessionInstructor = sessionData.instructor_id === user.id || hasAdminAccess;
+        setIsInstructor(isSessionInstructor);
+        setIsViewer(!isSessionInstructor);
+
+        if (!isSessionInstructor) {
+          toast({
+            title: "Joined as Viewer",
+            description: "You're watching this session as a student",
+          });
+        }
 
         const { error: participantError } = await supabase
           .from("session_participants")
@@ -230,8 +251,8 @@ const LiveSession = () => {
             session_id: id,
             user_id: user.id,
             status: "active",
-            audio_enabled: userSettings.defaultAudioEnabled,
-            video_enabled: userSettings.defaultVideoEnabled,
+            audio_enabled: isSessionInstructor ? userSettings.defaultAudioEnabled : false,
+            video_enabled: isSessionInstructor ? userSettings.defaultVideoEnabled : false,
           });
 
         if (participantError) {
@@ -561,8 +582,10 @@ const LiveSession = () => {
           <Badge className="bg-destructive text-destructive-foreground animate-pulse">
             ● {session.status.toUpperCase()}
           </Badge>
-          {isInstructor && (
-            <Badge variant="secondary">Instructor</Badge>
+          {isInstructor ? (
+            <Badge variant="secondary" className="bg-primary/20 text-primary">Instructor</Badge>
+          ) : (
+            <Badge variant="outline" className="border-accent text-accent">Viewer</Badge>
           )}
         </div>
         
@@ -635,49 +658,75 @@ const LiveSession = () => {
         <div className="col-span-5 space-y-4 flex flex-col">
           {/* Main Video Area */}
           <Card className="relative aspect-video bg-black rounded-xl overflow-hidden shadow-2xl border-2 border-primary/20">
-            <video
-              ref={videoRef}
-              autoPlay
-              playsInline
-              muted
-              className={`w-full h-full object-cover ${isVideoOff ? 'hidden' : ''}`}
-            />
-            {isVideoOff && (
-              <div className="absolute inset-0 bg-gradient-to-br from-primary/20 to-accent/20 flex items-center justify-center">
-                <div className="text-center">
-                  <div className="w-24 h-24 rounded-full bg-primary/20 flex items-center justify-center mx-auto mb-4 animate-pulse">
-                    <VideoOff className="h-12 w-12 text-primary" />
+            {isInstructor ? (
+              <>
+                <video
+                  ref={videoRef}
+                  autoPlay
+                  playsInline
+                  muted
+                  className={`w-full h-full object-cover mirror ${isVideoOff ? 'hidden' : ''}`}
+                  style={{ transform: 'scaleX(-1)' }}
+                />
+                {isVideoOff && (
+                  <div className="absolute inset-0 bg-gradient-to-br from-primary/20 to-accent/20 flex items-center justify-center">
+                    <div className="text-center">
+                      <div className="w-24 h-24 rounded-full bg-primary/20 flex items-center justify-center mx-auto mb-4 animate-pulse">
+                        <VideoOff className="h-12 w-12 text-primary" />
+                      </div>
+                      <p className="text-muted-foreground">Camera Off</p>
+                    </div>
                   </div>
-                  <p className="text-muted-foreground">Camera Off</p>
+                )}
+              </>
+            ) : (
+              // Viewer sees instructor's placeholder
+              <div className="absolute inset-0 bg-gradient-to-br from-slate-800 to-slate-900 flex items-center justify-center">
+                <div className="text-center">
+                  <div className="w-24 h-24 rounded-full bg-primary/30 flex items-center justify-center mx-auto mb-4 ring-4 ring-primary/20">
+                    <Video className="h-12 w-12 text-primary" />
+                  </div>
+                  <p className="text-white font-medium">Instructor's Stream</p>
+                  <p className="text-muted-foreground text-sm mt-1">Live session in progress</p>
                 </div>
               </div>
             )}
             
-            {/* Video Controls Overlay */}
-            <div className="absolute bottom-4 left-1/2 -translate-x-1/2 flex items-center gap-2 bg-background/90 backdrop-blur rounded-full px-4 py-2 shadow-lg border border-border">
-              <Button
-                variant={isMuted ? "destructive" : "secondary"}
-                size="icon"
-                className="rounded-full h-10 w-10"
-                onClick={toggleMute}
-              >
-                {isMuted ? <MicOff className="h-5 w-5" /> : <Mic className="h-5 w-5" />}
-              </Button>
-              <Button
-                variant={isVideoOff ? "destructive" : "secondary"}
-                size="icon"
-                className="rounded-full h-10 w-10"
-                onClick={toggleVideo}
-              >
-                {isVideoOff ? <VideoOff className="h-5 w-5" /> : <Video className="h-5 w-5" />}
-              </Button>
-            </div>
+            {/* Video Controls Overlay - Only for instructors */}
+            {isInstructor && (
+              <div className="absolute bottom-4 left-1/2 -translate-x-1/2 flex items-center gap-2 bg-background/90 backdrop-blur rounded-full px-4 py-2 shadow-lg border border-border">
+                <Button
+                  variant={isMuted ? "destructive" : "secondary"}
+                  size="icon"
+                  className="rounded-full h-10 w-10"
+                  onClick={toggleMute}
+                >
+                  {isMuted ? <MicOff className="h-5 w-5" /> : <Mic className="h-5 w-5" />}
+                </Button>
+                <Button
+                  variant={isVideoOff ? "destructive" : "secondary"}
+                  size="icon"
+                  className="rounded-full h-10 w-10"
+                  onClick={toggleVideo}
+                >
+                  {isVideoOff ? <VideoOff className="h-5 w-5" /> : <Video className="h-5 w-5" />}
+                </Button>
+              </div>
+            )}
 
             {/* Live indicator */}
             <div className="absolute top-4 left-4 flex items-center gap-2 bg-destructive/90 text-destructive-foreground px-3 py-1 rounded-full text-xs font-medium">
               <span className="w-2 h-2 bg-white rounded-full animate-pulse" />
               LIVE
             </div>
+            
+            {/* Viewer badge */}
+            {isViewer && (
+              <div className="absolute top-4 right-4 flex items-center gap-2 bg-accent/90 text-accent-foreground px-3 py-1 rounded-full text-xs font-medium">
+                <Users className="h-3 w-3" />
+                Viewing
+              </div>
+            )}
           </Card>
 
           {/* Notepad */}
@@ -754,34 +803,57 @@ const LiveSession = () => {
 
         {/* Right Column - AI Chatbot + Session Chat */}
         <div className="col-span-3 space-y-4 flex flex-col">
-          {/* AI Tutor Chatbot */}
-          <Card className="flex-1 p-4 flex flex-col bg-gradient-to-br from-primary/10 to-accent/10 border-primary/30">
+          {/* AI Tutor Chatbot - Enhanced */}
+          <Card className="flex-1 p-4 flex flex-col bg-gradient-to-br from-primary/10 via-accent/5 to-primary/10 border-primary/30 shadow-lg shadow-primary/10">
             <div className="flex items-center justify-between mb-3">
               <h3 className="font-medium text-sm flex items-center gap-2">
-                <Bot className="h-4 w-4 text-primary" />
+                <div className="relative">
+                  <Bot className="h-5 w-5 text-primary" />
+                  <span className="absolute -top-1 -right-1 w-2 h-2 bg-green-500 rounded-full animate-pulse" />
+                </div>
                 AI Tutor
-                <Badge className="bg-primary/20 text-primary text-xs">Ask Doubts</Badge>
+                <Badge className="bg-gradient-to-r from-primary/30 to-accent/30 text-primary text-xs border-0">
+                  <Sparkles className="h-3 w-3 mr-1" />
+                  Smart Help
+                </Badge>
               </h3>
+            </div>
+            
+            {/* Quick Action Buttons */}
+            <div className="flex flex-wrap gap-1 mb-3">
+              {['Explain code', 'Debug help', 'Best practices'].map((action) => (
+                <button
+                  key={action}
+                  onClick={() => setAiInput(action)}
+                  className="text-xs px-2 py-1 rounded-full bg-primary/10 hover:bg-primary/20 text-primary transition-colors"
+                >
+                  {action}
+                </button>
+              ))}
             </div>
             
             <ScrollArea className="flex-1 pr-2">
               <div className="space-y-3">
                 {aiMessages.map((msg, idx) => (
                   <div key={idx} className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}>
-                    <div className={`max-w-[90%] rounded-lg px-3 py-2 text-sm ${
+                    <div className={`max-w-[90%] rounded-xl px-4 py-2.5 text-sm ${
                       msg.role === 'user' 
-                        ? 'bg-primary text-primary-foreground' 
-                        : 'bg-muted'
+                        ? 'bg-primary text-primary-foreground rounded-br-sm' 
+                        : 'bg-card border border-border shadow-sm rounded-bl-sm'
                     }`}>
-                      {msg.content}
+                      <div className="whitespace-pre-wrap">{msg.content}</div>
                     </div>
                   </div>
                 ))}
                 {isAiLoading && (
                   <div className="flex justify-start">
-                    <div className="bg-muted rounded-lg px-3 py-2 text-sm flex items-center gap-2">
-                      <Loader2 className="h-3 w-3 animate-spin" />
-                      Thinking...
+                    <div className="bg-card border border-border rounded-xl rounded-bl-sm px-4 py-2.5 text-sm flex items-center gap-2 shadow-sm">
+                      <div className="flex gap-1">
+                        <span className="w-2 h-2 bg-primary rounded-full animate-bounce" style={{ animationDelay: '0ms' }} />
+                        <span className="w-2 h-2 bg-primary rounded-full animate-bounce" style={{ animationDelay: '150ms' }} />
+                        <span className="w-2 h-2 bg-primary rounded-full animate-bounce" style={{ animationDelay: '300ms' }} />
+                      </div>
+                      <span className="text-muted-foreground">Thinking...</span>
                     </div>
                   </div>
                 )}
@@ -790,18 +862,19 @@ const LiveSession = () => {
             
             <div className="flex gap-2 mt-3 pt-3 border-t border-primary/20">
               <Input
-                placeholder="Ask your doubt..."
+                placeholder="Ask anything about programming..."
                 value={aiInput}
                 onChange={(e) => setAiInput(e.target.value)}
-                onKeyPress={(e) => e.key === 'Enter' && handleAskAI()}
-                className="flex-1 bg-background/50"
+                onKeyPress={(e) => e.key === 'Enter' && !isAiLoading && handleAskAI()}
+                className="flex-1 bg-background/70 border-primary/20 focus:border-primary/50"
                 disabled={isAiLoading}
               />
               <Button 
                 size="icon" 
                 variant="default" 
                 onClick={handleAskAI}
-                disabled={isAiLoading}
+                disabled={isAiLoading || !aiInput.trim()}
+                className="bg-primary hover:bg-primary/90 shadow-lg shadow-primary/20"
               >
                 <Send className="h-4 w-4" />
               </Button>
