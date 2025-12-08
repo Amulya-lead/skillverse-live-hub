@@ -19,21 +19,27 @@ serve(async (req) => {
       throw new Error('LOVABLE_API_KEY is not set');
     }
 
-    const systemPrompt = `You are an intelligent AI tutor assistant for SkillVerse, an online learning platform. Your role is to:
+    const systemPrompt = `You are an expert AI programming tutor for SkillVerse, an online learning platform. Your role is to help students master programming concepts.
 
-1. Help students understand programming concepts clearly
-2. Answer doubts related to coding, algorithms, data structures, and software development
-3. Explain complex topics in simple terms with examples
-4. Provide code snippets when helpful
-5. Be encouraging and supportive
+CURRENT SESSION: ${context || 'General programming assistance'}
 
-Current session context: ${context || 'General programming assistance'}
+YOUR TEACHING STYLE:
+- Break down complex concepts into digestible pieces
+- Use analogies and real-world examples
+- Provide working code examples when helpful
+- Be encouraging and patient
+- Ask clarifying questions when needed
 
-Guidelines:
-- Keep responses concise but informative
-- Use code examples when explaining programming concepts
-- If asked about non-programming topics, gently redirect to learning topics
-- Be friendly and encouraging`;
+RESPONSE GUIDELINES:
+1. For code explanations: Walk through line by line
+2. For debugging: Help identify the issue, explain why it happens, show the fix
+3. For concepts: Start simple, then add complexity
+4. For best practices: Explain the "why" behind recommendations
+
+Keep responses focused and practical. Use markdown for code blocks.
+If asked about non-programming topics, gently guide back to learning.
+
+Be conversational, friendly, and supportive. Use emojis sparingly for encouragement.`;
 
     const response = await fetch('https://ai.gateway.lovable.dev/v1/chat/completions', {
       method: 'POST',
@@ -47,18 +53,30 @@ Guidelines:
           { role: 'system', content: systemPrompt },
           { role: 'user', content: message }
         ],
-        max_tokens: 1000,
+        max_tokens: 1500,
+        temperature: 0.7,
       }),
     });
 
     if (!response.ok) {
       const errorText = await response.text();
       console.error('AI Gateway error:', errorText);
+      
+      if (response.status === 429) {
+        return new Response(JSON.stringify({ 
+          reply: "I'm getting a lot of questions right now! Please wait a moment and try again. 🙏" 
+        }), {
+          headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+        });
+      }
+      
       throw new Error(`AI Gateway error: ${response.status}`);
     }
 
     const data = await response.json();
     const reply = data.choices[0]?.message?.content || "I'm sorry, I couldn't process that. Please try again.";
+
+    console.log('AI Tutor response generated successfully');
 
     return new Response(JSON.stringify({ reply }), {
       headers: { ...corsHeaders, 'Content-Type': 'application/json' },
@@ -66,8 +84,11 @@ Guidelines:
   } catch (error: unknown) {
     console.error('Error in ai-tutor function:', error);
     const errorMessage = error instanceof Error ? error.message : 'Unknown error';
-    return new Response(JSON.stringify({ error: errorMessage }), {
-      status: 500,
+    return new Response(JSON.stringify({ 
+      reply: "I'm having a moment! Please try your question again. 💭",
+      error: errorMessage 
+    }), {
+      status: 200, // Return 200 with fallback message instead of error
       headers: { ...corsHeaders, 'Content-Type': 'application/json' },
     });
   }
