@@ -8,6 +8,8 @@ import { Badge } from "@/components/ui/badge";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { useToast } from "@/hooks/use-toast";
 import { supabase } from "@/integrations/supabase/client";
+import FloatingPanel from "@/components/FloatingPanel";
+import ToolToggleBar from "@/components/ToolToggleBar";
 import { 
   Video, 
   Mic, 
@@ -22,7 +24,9 @@ import {
   Loader2,
   Bot,
   Play,
-  Sparkles
+  Sparkles,
+  GraduationCap,
+  Zap
 } from "lucide-react";
 import {
   Dialog,
@@ -83,11 +87,13 @@ const LiveSession = () => {
   const navigate = useNavigate();
   const { toast } = useToast();
   const videoRef = useRef<HTMLVideoElement>(null);
+  const aiChatRef = useRef<HTMLDivElement>(null);
+  const sessionChatRef = useRef<HTMLDivElement>(null);
   
   const [loading, setLoading] = useState(true);
   const [session, setSession] = useState<LiveSessionData | null>(null);
   const [isInstructor, setIsInstructor] = useState(false);
-  const [isViewer, setIsViewer] = useState(false); // Students join as viewers
+  const [isViewer, setIsViewer] = useState(false);
   const [currentUserId, setCurrentUserId] = useState<string>("");
   
   const [isMuted, setIsMuted] = useState(false);
@@ -113,10 +119,17 @@ const LiveSession = () => {
   const [chatMessages, setChatMessages] = useState<ChatMessage[]>([]);
   const [participants, setParticipants] = useState<SessionParticipant[]>([]);
   const [participantCount, setParticipantCount] = useState(0);
+  const [instructorProfile, setInstructorProfile] = useState<{ full_name: string | null } | null>(null);
+  
+  // Floating panel states
+  const [showNotes, setShowNotes] = useState(false);
+  const [showAI, setShowAI] = useState(false);
+  const [showCode, setShowCode] = useState(false);
+  const [showChat, setShowChat] = useState(false);
   
   // AI Chatbot states
   const [aiMessages, setAiMessages] = useState<AIChatMessage[]>([
-    { role: 'assistant', content: '👋 Hi! I\'m your AI programming tutor. I can help you with:\n\n• **Code explanations** - Understand any code snippet\n• **Debugging** - Find and fix errors\n• **Concepts** - Learn programming fundamentals\n• **Best practices** - Write cleaner code\n\nWhat would you like to learn today?' }
+    { role: 'assistant', content: 'Hi! I\'m your AI programming tutor. I can help you with code explanations, debugging, concepts, and best practices. What would you like to learn today?' }
   ]);
   const [aiInput, setAiInput] = useState("");
   const [isAiLoading, setIsAiLoading] = useState(false);
@@ -127,12 +140,24 @@ const LiveSession = () => {
     notificationsEnabled: true,
   });
 
+  // Auto-scroll AI chat
+  useEffect(() => {
+    if (aiChatRef.current) {
+      aiChatRef.current.scrollTop = aiChatRef.current.scrollHeight;
+    }
+  }, [aiMessages]);
+
+  // Auto-scroll session chat
+  useEffect(() => {
+    if (sessionChatRef.current) {
+      sessionChatRef.current.scrollTop = sessionChatRef.current.scrollHeight;
+    }
+  }, [chatMessages]);
+
   // Initialize camera and microphone - only for instructors
   useEffect(() => {
-    // Wait for role check to complete
     if (loading) return;
     
-    // Only instructors get video/audio access
     if (isViewer) {
       console.log("Viewer mode - no media access needed");
       return;
@@ -142,50 +167,30 @@ const LiveSession = () => {
       try {
         console.log("Requesting media access for instructor...");
         const mediaStream = await navigator.mediaDevices.getUserMedia({
-          video: { 
-            width: { ideal: 1280 }, 
-            height: { ideal: 720 }, 
-            facingMode: "user" 
-          },
-          audio: {
-            echoCancellation: true,
-            noiseSuppression: true,
-            autoGainControl: true
-          }
+          video: { width: { ideal: 1280 }, height: { ideal: 720 }, facingMode: "user" },
+          audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true }
         });
         
         console.log("Media stream obtained:", mediaStream.getTracks());
         setStream(mediaStream);
         
-        // Connect to video element after a short delay to ensure DOM is ready
         setTimeout(() => {
           if (videoRef.current && mediaStream) {
             videoRef.current.srcObject = mediaStream;
-            videoRef.current.muted = true; // Mute local playback to avoid echo
+            videoRef.current.muted = true;
             videoRef.current.play().catch(e => console.error("Play error:", e));
             console.log("Video connected to element");
           }
         }, 100);
 
-        toast({
-          title: "Camera & Microphone Connected",
-          description: "Your devices are ready for the session",
-        });
+        toast({ title: "Camera & Microphone Connected", description: "Your devices are ready for the session" });
       } catch (error) {
         console.error("Media access error:", error);
-        toast({
-          title: "Media Access Denied",
-          description: "Please allow camera and microphone access to conduct the session",
-          variant: "destructive",
-        });
+        toast({ title: "Media Access Denied", description: "Please allow camera and microphone access", variant: "destructive" });
       }
     };
 
     initMedia();
-
-    return () => {
-      // Cleanup handled in separate effect
-    };
   }, [loading, isViewer]);
 
   // Reconnect stream to video element when stream changes
@@ -218,7 +223,7 @@ const LiveSession = () => {
 
         const hasAdminAccess = roleData && roleData.length > 0;
 
-        // Get session data first
+        // Get session data
         const { data: sessionData, error: sessionError } = await supabase
           .from("live_sessions")
           .select("*")
@@ -226,27 +231,29 @@ const LiveSession = () => {
           .maybeSingle();
 
         if (sessionError || !sessionData) {
-          toast({
-            title: "Error",
-            description: "Session not found",
-            variant: "destructive",
-          });
+          toast({ title: "Error", description: "Session not found", variant: "destructive" });
           navigate("/dashboard");
           return;
         }
 
         setSession(sessionData);
         
-        // Determine role: instructor or viewer (student)
+        // Get instructor profile for viewers to see
+        const { data: instructorData } = await supabase
+          .from("profiles")
+          .select("full_name")
+          .eq("id", sessionData.instructor_id)
+          .maybeSingle();
+        
+        setInstructorProfile(instructorData);
+        
+        // Determine role
         const isSessionInstructor = sessionData.instructor_id === user.id || hasAdminAccess;
         setIsInstructor(isSessionInstructor);
         setIsViewer(!isSessionInstructor);
 
         if (!isSessionInstructor) {
-          toast({
-            title: "Joined as Viewer",
-            description: "You're watching this session as a student",
-          });
+          toast({ title: "Joined as Viewer", description: "You're watching this session as a student" });
         }
 
         const { error: participantError } = await supabase
@@ -287,34 +294,16 @@ const LiveSession = () => {
 
     const chatChannel = supabase
       .channel(`chat:${id}`)
-      .on(
-        "postgres_changes",
-        {
-          event: "INSERT",
-          schema: "public",
-          table: "chat_messages",
-          filter: `session_id=eq.${id}`,
-        },
-        () => {
-          loadChatMessages();
-        }
-      )
+      .on("postgres_changes", { event: "INSERT", schema: "public", table: "chat_messages", filter: `session_id=eq.${id}` }, () => {
+        loadChatMessages();
+      })
       .subscribe();
 
     const participantsChannel = supabase
       .channel(`participants:${id}`)
-      .on(
-        "postgres_changes",
-        {
-          event: "*",
-          schema: "public",
-          table: "session_participants",
-          filter: `session_id=eq.${id}`,
-        },
-        () => {
-          loadParticipants();
-        }
-      )
+      .on("postgres_changes", { event: "*", schema: "public", table: "session_participants", filter: `session_id=eq.${id}` }, () => {
+        loadParticipants();
+      })
       .subscribe();
 
     return () => {
@@ -346,13 +335,11 @@ const LiveSession = () => {
     if (!currentUserId || !id || !notes) return;
 
     const saveNotes = setTimeout(async () => {
-      await supabase
-        .from("session_notes")
-        .upsert({
-          session_id: id,
-          user_id: currentUserId,
-          content: notes,
-        });
+      await supabase.from("session_notes").upsert({
+        session_id: id,
+        user_id: currentUserId,
+        content: notes,
+      });
     }, 5000);
 
     return () => clearTimeout(saveNotes);
@@ -372,9 +359,7 @@ const LiveSession = () => {
         .select("id, full_name")
         .in("id", userIds);
 
-      const profilesMap = new Map(
-        profilesData?.map(p => [p.id, p.full_name]) || []
-      );
+      const profilesMap = new Map(profilesData?.map(p => [p.id, p.full_name]) || []);
 
       const messagesWithProfiles = data.map(msg => ({
         ...msg,
@@ -393,16 +378,13 @@ const LiveSession = () => {
       .eq("status", "active");
 
     if (!error && data) {
-      // Fetch profiles for participants
       const userIds = data.map(p => p.user_id);
       const { data: profilesData } = await supabase
         .from("profiles")
         .select("id, full_name, email")
         .in("id", userIds);
 
-      const profilesMap = new Map(
-        profilesData?.map(p => [p.id, { full_name: p.full_name, email: p.email }]) || []
-      );
+      const profilesMap = new Map(profilesData?.map(p => [p.id, { full_name: p.full_name, email: p.email }]) || []);
 
       const participantsWithProfiles = data.map(p => ({
         ...p,
@@ -416,41 +398,23 @@ const LiveSession = () => {
 
   const toggleMute = async () => {
     if (stream) {
-      stream.getAudioTracks().forEach(track => {
-        track.enabled = !track.enabled;
-      });
+      stream.getAudioTracks().forEach(track => { track.enabled = !track.enabled; });
       const newMutedState = !isMuted;
       setIsMuted(newMutedState);
       
-      await supabase
-        .from("session_participants")
-        .update({ audio_enabled: !newMutedState })
-        .eq("session_id", id)
-        .eq("user_id", currentUserId);
-
-      toast({
-        title: newMutedState ? "Microphone Off" : "Microphone On",
-      });
+      await supabase.from("session_participants").update({ audio_enabled: !newMutedState }).eq("session_id", id).eq("user_id", currentUserId);
+      toast({ title: newMutedState ? "Microphone Off" : "Microphone On" });
     }
   };
 
   const toggleVideo = async () => {
     if (stream) {
-      stream.getVideoTracks().forEach(track => {
-        track.enabled = !track.enabled;
-      });
+      stream.getVideoTracks().forEach(track => { track.enabled = !track.enabled; });
       const newVideoState = !isVideoOff;
       setIsVideoOff(newVideoState);
       
-      await supabase
-        .from("session_participants")
-        .update({ video_enabled: !newVideoState })
-        .eq("session_id", id)
-        .eq("user_id", currentUserId);
-
-      toast({
-        title: newVideoState ? "Camera Off" : "Camera On",
-      });
+      await supabase.from("session_participants").update({ video_enabled: !newVideoState }).eq("session_id", id).eq("user_id", currentUserId);
+      toast({ title: newVideoState ? "Camera Off" : "Camera On" });
     }
   };
 
@@ -459,16 +423,9 @@ const LiveSession = () => {
       stream.getTracks().forEach(track => track.stop());
     }
 
-    await supabase
-      .from("session_participants")
-      .update({ status: "left", left_at: new Date().toISOString() })
-      .eq("session_id", id)
-      .eq("user_id", currentUserId);
+    await supabase.from("session_participants").update({ status: "left", left_at: new Date().toISOString() }).eq("session_id", id).eq("user_id", currentUserId);
 
-    toast({
-      title: "Session Ended",
-      description: "You have left the session",
-    });
+    toast({ title: "Session Ended", description: "You have left the session" });
     navigate("/dashboard");
   };
 
@@ -485,7 +442,6 @@ const LiveSession = () => {
       
       setCodeOutput(data.output || "No output");
       
-      // Save code snippet
       await supabase.from("code_snippets").insert({
         session_id: id,
         user_id: currentUserId,
@@ -494,10 +450,7 @@ const LiveSession = () => {
         output: data.output,
       });
 
-      toast({
-        title: "Code Executed",
-        description: "Check the output below",
-      });
+      toast({ title: "Code Executed", description: "Check the output below" });
     } catch (error) {
       console.error("Code execution error:", error);
       setCodeOutput("Error executing code. Please try again.");
@@ -509,20 +462,14 @@ const LiveSession = () => {
   const handleSendMessage = async () => {
     if (!message.trim() || !session?.chat_enabled) return;
 
-    const { error } = await supabase
-      .from("chat_messages")
-      .insert({
-        session_id: id,
-        user_id: currentUserId,
-        message: message.trim(),
-      });
+    const { error } = await supabase.from("chat_messages").insert({
+      session_id: id,
+      user_id: currentUserId,
+      message: message.trim(),
+    });
 
     if (error) {
-      toast({
-        title: "Error",
-        description: "Failed to send message",
-        variant: "destructive",
-      });
+      toast({ title: "Error", description: "Failed to send message", variant: "destructive" });
     } else {
       setMessage("");
     }
@@ -538,10 +485,7 @@ const LiveSession = () => {
 
     try {
       const { data, error } = await supabase.functions.invoke('ai-tutor', {
-        body: { 
-          message: userMessage, 
-          context: session?.title || 'Programming session'
-        }
+        body: { message: userMessage, context: session?.title || 'Programming session' }
       });
 
       if (error) throw error;
@@ -549,37 +493,38 @@ const LiveSession = () => {
       setAiMessages(prev => [...prev, { role: 'assistant', content: data.reply }]);
     } catch (error) {
       console.error("AI error:", error);
-      setAiMessages(prev => [...prev, { 
-        role: 'assistant', 
-        content: "Sorry, I'm having trouble connecting. Please try again in a moment." 
-      }]);
+      setAiMessages(prev => [...prev, { role: 'assistant', content: "Sorry, I'm having trouble connecting. Please try again in a moment." }]);
     } finally {
       setIsAiLoading(false);
     }
   };
 
   const handleSaveSettings = async () => {
-    await supabase
-      .from("user_settings")
-      .upsert({
-        user_id: currentUserId,
-        default_audio_enabled: userSettings.defaultAudioEnabled,
-        default_video_enabled: userSettings.defaultVideoEnabled,
-        notifications_enabled: userSettings.notificationsEnabled,
-      });
-
-    toast({
-      title: "Settings Saved",
-      description: "Your preferences have been updated",
+    await supabase.from("user_settings").upsert({
+      user_id: currentUserId,
+      default_audio_enabled: userSettings.defaultAudioEnabled,
+      default_video_enabled: userSettings.defaultVideoEnabled,
+      notifications_enabled: userSettings.notificationsEnabled,
     });
+
+    toast({ title: "Settings Saved", description: "Your preferences have been updated" });
   };
+
+  // Get students (non-instructors) for instructor view
+  const studentParticipants = participants.filter(p => p.user_id !== session?.instructor_id);
+  
+  // Get instructor for viewer view
+  const instructorParticipant = participants.find(p => p.user_id === session?.instructor_id);
 
   if (loading) {
     return (
       <div className="h-screen flex items-center justify-center bg-gradient-to-br from-background via-primary/5 to-accent/5">
         <div className="text-center">
-          <Loader2 className="h-12 w-12 animate-spin text-primary mx-auto mb-4" />
-          <p className="text-muted-foreground">Joining session...</p>
+          <div className="relative">
+            <Loader2 className="h-16 w-16 animate-spin text-primary mx-auto mb-4" />
+            <div className="absolute inset-0 h-16 w-16 mx-auto rounded-full bg-primary/20 animate-ping" />
+          </div>
+          <p className="text-muted-foreground animate-pulse">Joining session...</p>
         </div>
       </div>
     );
@@ -594,90 +539,95 @@ const LiveSession = () => {
   }
 
   return (
-    <div className="h-screen bg-gradient-to-br from-background via-primary/5 to-accent/5 flex flex-col overflow-hidden">
+    <div className="h-screen bg-gradient-to-br from-background via-primary/5 to-accent/5 flex flex-col overflow-hidden relative">
+      {/* Decorative Background Elements */}
+      <div className="absolute inset-0 overflow-hidden pointer-events-none">
+        <div className="absolute top-20 left-20 w-96 h-96 bg-primary/10 rounded-full blur-3xl animate-pulse" />
+        <div className="absolute bottom-20 right-20 w-80 h-80 bg-accent/10 rounded-full blur-3xl animate-pulse" style={{ animationDelay: '1s' }} />
+        <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[600px] h-[600px] bg-gradient-radial from-primary/5 to-transparent rounded-full" />
+      </div>
+
       {/* Top Bar */}
-      <div className="bg-card/80 backdrop-blur-sm border-b px-4 py-3 flex items-center justify-between">
+      <div className="relative z-10 bg-card/80 backdrop-blur-xl border-b border-border/50 px-6 py-4 flex items-center justify-between shadow-lg">
         <div className="flex items-center gap-4">
-          <h1 className="font-bold text-lg">{session.title}</h1>
-          <Badge className="bg-destructive text-destructive-foreground animate-pulse">
-            ● {session.status.toUpperCase()}
+          <div className="flex items-center gap-3">
+            <div className="relative">
+              <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-primary to-primary/70 flex items-center justify-center shadow-lg shadow-primary/30">
+                <Zap className="h-5 w-5 text-white" />
+              </div>
+              <span className="absolute -top-1 -right-1 w-3 h-3 bg-destructive rounded-full animate-pulse" />
+            </div>
+            <div>
+              <h1 className="font-bold text-lg">{session.title}</h1>
+              <p className="text-xs text-muted-foreground">Live Session</p>
+            </div>
+          </div>
+          <Badge className="bg-destructive/90 text-destructive-foreground animate-pulse shadow-lg shadow-destructive/30">
+            ● LIVE
           </Badge>
           {isInstructor ? (
-            <Badge variant="secondary" className="bg-primary/20 text-primary">Instructor</Badge>
+            <Badge className="bg-gradient-to-r from-primary to-accent text-white border-0 shadow-lg">
+              <GraduationCap className="h-3 w-3 mr-1" />
+              Instructor
+            </Badge>
           ) : (
-            <Badge variant="outline" className="border-accent text-accent">Viewer</Badge>
+            <Badge variant="outline" className="border-accent/50 text-accent bg-accent/10">
+              <Users className="h-3 w-3 mr-1" />
+              Viewer
+            </Badge>
           )}
         </div>
         
-        <div className="flex items-center gap-2">
-          <div className="flex items-center gap-2 text-sm text-muted-foreground mr-4">
-            <Users className="h-4 w-4" />
-            <span>{participantCount} participants</span>
+        <div className="flex items-center gap-3">
+          <div className="flex items-center gap-2 text-sm text-muted-foreground bg-muted/50 px-3 py-1.5 rounded-full">
+            <Users className="h-4 w-4 text-primary" />
+            <span className="font-medium">{participantCount}</span>
+            <span>participants</span>
           </div>
           
           <Dialog>
             <DialogTrigger asChild>
-              <Button variant="ghost" size="icon">
+              <Button variant="ghost" size="icon" className="rounded-xl hover:bg-muted">
                 <Settings className="h-5 w-5" />
               </Button>
             </DialogTrigger>
-            <DialogContent>
+            <DialogContent className="bg-card/95 backdrop-blur-xl">
               <DialogHeader>
                 <DialogTitle>Session Settings</DialogTitle>
-                <DialogDescription>
-                  Configure your session preferences
-                </DialogDescription>
+                <DialogDescription>Configure your session preferences</DialogDescription>
               </DialogHeader>
               <div className="space-y-4 py-4">
                 <div className="flex items-center justify-between">
                   <Label htmlFor="audio">Default Audio On</Label>
-                  <Switch
-                    id="audio"
-                    checked={userSettings.defaultAudioEnabled}
-                    onCheckedChange={(checked) =>
-                      setUserSettings({ ...userSettings, defaultAudioEnabled: checked })
-                    }
-                  />
+                  <Switch id="audio" checked={userSettings.defaultAudioEnabled} onCheckedChange={(checked) => setUserSettings({ ...userSettings, defaultAudioEnabled: checked })} />
                 </div>
                 <div className="flex items-center justify-between">
                   <Label htmlFor="video">Default Video On</Label>
-                  <Switch
-                    id="video"
-                    checked={userSettings.defaultVideoEnabled}
-                    onCheckedChange={(checked) =>
-                      setUserSettings({ ...userSettings, defaultVideoEnabled: checked })
-                    }
-                  />
+                  <Switch id="video" checked={userSettings.defaultVideoEnabled} onCheckedChange={(checked) => setUserSettings({ ...userSettings, defaultVideoEnabled: checked })} />
                 </div>
                 <div className="flex items-center justify-between">
                   <Label htmlFor="notifications">Notifications</Label>
-                  <Switch
-                    id="notifications"
-                    checked={userSettings.notificationsEnabled}
-                    onCheckedChange={(checked) =>
-                      setUserSettings({ ...userSettings, notificationsEnabled: checked })
-                    }
-                  />
+                  <Switch id="notifications" checked={userSettings.notificationsEnabled} onCheckedChange={(checked) => setUserSettings({ ...userSettings, notificationsEnabled: checked })} />
                 </div>
-                <Button onClick={handleSaveSettings} className="w-full">
-                  Save Settings
-                </Button>
+                <Button onClick={handleSaveSettings} className="w-full">Save Settings</Button>
               </div>
             </DialogContent>
           </Dialog>
           
-          <Button variant="destructive" size="sm" onClick={handleLeaveSession}>
+          <Button variant="destructive" size="sm" onClick={handleLeaveSession} className="rounded-xl shadow-lg shadow-destructive/30">
             Leave Session
           </Button>
         </div>
       </div>
 
-      {/* Main Content */}
-      <div className="flex-1 p-4 grid grid-cols-12 gap-4 overflow-hidden">
-        {/* Left Column - Video + Notes */}
-        <div className="col-span-5 space-y-4 flex flex-col">
-          {/* Main Video Area */}
-          <Card className="relative aspect-video bg-black rounded-xl overflow-hidden shadow-2xl border-2 border-primary/20">
+      {/* Main Content Area */}
+      <div className="flex-1 relative p-6 overflow-hidden">
+        {/* Center Video Area */}
+        <div className="flex flex-col lg:flex-row gap-6 h-full max-w-6xl mx-auto">
+          {/* Main Video */}
+          <Card className="flex-1 relative aspect-video bg-black rounded-2xl overflow-hidden shadow-2xl border-2 border-primary/20 group">
+            <div className="absolute inset-0 bg-gradient-to-t from-black/50 via-transparent to-transparent z-10" />
+            
             {isInstructor ? (
               <>
                 <video
@@ -685,326 +635,316 @@ const LiveSession = () => {
                   autoPlay
                   playsInline
                   muted
-                  className={`w-full h-full object-cover mirror ${isVideoOff ? 'hidden' : ''}`}
+                  className={`w-full h-full object-cover ${isVideoOff ? 'hidden' : ''}`}
                   style={{ transform: 'scaleX(-1)' }}
                 />
                 {isVideoOff && (
-                  <div className="absolute inset-0 bg-gradient-to-br from-primary/20 to-accent/20 flex items-center justify-center">
+                  <div className="absolute inset-0 bg-gradient-to-br from-slate-800 to-slate-900 flex items-center justify-center">
                     <div className="text-center">
-                      <div className="w-24 h-24 rounded-full bg-primary/20 flex items-center justify-center mx-auto mb-4 animate-pulse">
-                        <VideoOff className="h-12 w-12 text-primary" />
+                      <div className="w-28 h-28 rounded-full bg-gradient-to-br from-primary/30 to-accent/30 flex items-center justify-center mx-auto mb-4 animate-pulse shadow-2xl shadow-primary/30">
+                        <VideoOff className="h-14 w-14 text-primary" />
                       </div>
-                      <p className="text-muted-foreground">Camera Off</p>
+                      <p className="text-white font-medium">Camera Off</p>
                     </div>
                   </div>
                 )}
+                
+                {/* Instructor Controls */}
+                <div className="absolute bottom-6 left-1/2 -translate-x-1/2 z-20 flex items-center gap-3 bg-background/90 backdrop-blur-xl rounded-2xl px-6 py-3 shadow-2xl border border-border/50 opacity-0 group-hover:opacity-100 transition-opacity">
+                  <Button variant={isMuted ? "destructive" : "secondary"} size="icon" className="rounded-xl h-12 w-12" onClick={toggleMute}>
+                    {isMuted ? <MicOff className="h-5 w-5" /> : <Mic className="h-5 w-5" />}
+                  </Button>
+                  <Button variant={isVideoOff ? "destructive" : "secondary"} size="icon" className="rounded-xl h-12 w-12" onClick={toggleVideo}>
+                    {isVideoOff ? <VideoOff className="h-5 w-5" /> : <Video className="h-5 w-5" />}
+                  </Button>
+                </div>
               </>
             ) : (
-              // Viewer sees instructor's placeholder
-              <div className="absolute inset-0 bg-gradient-to-br from-slate-800 to-slate-900 flex items-center justify-center">
+              <div className="absolute inset-0 bg-gradient-to-br from-slate-800 via-slate-900 to-black flex items-center justify-center">
                 <div className="text-center">
-                  <div className="w-24 h-24 rounded-full bg-primary/30 flex items-center justify-center mx-auto mb-4 ring-4 ring-primary/20">
-                    <Video className="h-12 w-12 text-primary" />
+                  <div className="w-32 h-32 rounded-full bg-gradient-to-br from-primary/40 to-accent/40 flex items-center justify-center mx-auto mb-6 ring-4 ring-primary/30 shadow-2xl shadow-primary/30 animate-pulse">
+                    <GraduationCap className="h-16 w-16 text-primary" />
                   </div>
-                  <p className="text-white font-medium">Instructor's Stream</p>
-                  <p className="text-muted-foreground text-sm mt-1">Live session in progress</p>
+                  <p className="text-white font-bold text-xl mb-1">{instructorProfile?.full_name || 'Instructor'}</p>
+                  <p className="text-muted-foreground text-sm">Teaching Live</p>
                 </div>
               </div>
             )}
             
-            {/* Video Controls Overlay - Only for instructors */}
-            {isInstructor && (
-              <div className="absolute bottom-4 left-1/2 -translate-x-1/2 flex items-center gap-2 bg-background/90 backdrop-blur rounded-full px-4 py-2 shadow-lg border border-border">
-                <Button
-                  variant={isMuted ? "destructive" : "secondary"}
-                  size="icon"
-                  className="rounded-full h-10 w-10"
-                  onClick={toggleMute}
-                >
-                  {isMuted ? <MicOff className="h-5 w-5" /> : <Mic className="h-5 w-5" />}
-                </Button>
-                <Button
-                  variant={isVideoOff ? "destructive" : "secondary"}
-                  size="icon"
-                  className="rounded-full h-10 w-10"
-                  onClick={toggleVideo}
-                >
-                  {isVideoOff ? <VideoOff className="h-5 w-5" /> : <Video className="h-5 w-5" />}
-                </Button>
-              </div>
-            )}
-
-            {/* Live indicator */}
-            <div className="absolute top-4 left-4 flex items-center gap-2 bg-destructive/90 text-destructive-foreground px-3 py-1 rounded-full text-xs font-medium">
-              <span className="w-2 h-2 bg-white rounded-full animate-pulse" />
+            {/* Live Indicator */}
+            <div className="absolute top-4 left-4 z-20 flex items-center gap-2 bg-destructive/90 text-destructive-foreground px-4 py-2 rounded-full text-sm font-medium shadow-lg shadow-destructive/40">
+              <span className="w-2.5 h-2.5 bg-white rounded-full animate-pulse" />
               LIVE
             </div>
             
-            {/* Viewer badge */}
-            {isViewer && (
-              <div className="absolute top-4 right-4 flex items-center gap-2 bg-accent/90 text-accent-foreground px-3 py-1 rounded-full text-xs font-medium">
-                <Users className="h-3 w-3" />
-                Viewing
-              </div>
-            )}
+            {/* Role Badge */}
+            <div className="absolute top-4 right-4 z-20">
+              {isViewer ? (
+                <Badge className="bg-accent/90 text-white border-0 shadow-lg shadow-accent/30">
+                  <Users className="h-3 w-3 mr-1" />
+                  Viewing
+                </Badge>
+              ) : (
+                <Badge className="bg-primary/90 text-white border-0 shadow-lg shadow-primary/30">
+                  <GraduationCap className="h-3 w-3 mr-1" />
+                  Broadcasting
+                </Badge>
+              )}
+            </div>
           </Card>
 
-          {/* Enrolled Students Panel - Only for Instructors */}
-          {isInstructor && (
-            <Card className="p-4 bg-card/80 backdrop-blur-sm border-primary/20">
-              <div className="flex items-center justify-between mb-3">
-                <h3 className="font-medium text-sm flex items-center gap-2">
-                  <Users className="h-4 w-4 text-primary" />
-                  Enrolled Students
-                  <Badge variant="secondary" className="text-xs">{participantCount}</Badge>
-                </h3>
-              </div>
-              <ScrollArea className="h-32">
-                <div className="space-y-2">
-                  {participants.filter(p => p.user_id !== currentUserId).length === 0 ? (
-                    <p className="text-xs text-muted-foreground text-center py-4">No students have joined yet</p>
+          {/* Participants Panel */}
+          <Card className="w-full lg:w-80 p-4 bg-card/80 backdrop-blur-xl border-border/50 shadow-xl">
+            <div className="flex items-center gap-2 mb-4">
+              <Users className="h-5 w-5 text-primary" />
+              <h3 className="font-semibold">{isInstructor ? 'Enrolled Students' : 'Session Info'}</h3>
+              <Badge variant="secondary" className="ml-auto">{isInstructor ? studentParticipants.length : participantCount}</Badge>
+            </div>
+            
+            <ScrollArea className="h-[calc(100%-3rem)]">
+              {isInstructor ? (
+                // Instructor sees students
+                <div className="space-y-3">
+                  {studentParticipants.length === 0 ? (
+                    <div className="text-center py-8">
+                      <Users className="h-12 w-12 text-muted-foreground/30 mx-auto mb-3" />
+                      <p className="text-sm text-muted-foreground">No students have joined yet</p>
+                    </div>
                   ) : (
-                    participants.filter(p => p.user_id !== currentUserId).map((participant) => (
-                      <div 
-                        key={participant.id} 
-                        className="flex items-center justify-between p-2 bg-muted/30 rounded-lg"
-                      >
-                        <div className="flex items-center gap-2">
-                          <div className="w-8 h-8 rounded-full bg-primary/20 flex items-center justify-center text-xs font-medium text-primary">
+                    studentParticipants.map((participant) => (
+                      <div key={participant.id} className="flex items-center justify-between p-3 bg-muted/30 rounded-xl hover:bg-muted/50 transition-colors">
+                        <div className="flex items-center gap-3">
+                          <div className="w-10 h-10 rounded-full bg-gradient-to-br from-primary/30 to-accent/30 flex items-center justify-center text-sm font-bold text-primary shadow-lg">
                             {participant.profile?.full_name?.[0]?.toUpperCase() || 'S'}
                           </div>
                           <div>
-                            <p className="text-sm font-medium">{participant.profile?.full_name || 'Student'}</p>
+                            <p className="font-medium text-sm">{participant.profile?.full_name || 'Student'}</p>
                             <p className="text-xs text-muted-foreground">{participant.profile?.email || 'No email'}</p>
                           </div>
                         </div>
-                        <div className="flex items-center gap-1">
-                          {participant.audio_enabled ? (
-                            <Mic className="h-3 w-3 text-success" />
-                          ) : (
-                            <MicOff className="h-3 w-3 text-muted-foreground" />
-                          )}
-                          {participant.video_enabled ? (
-                            <Video className="h-3 w-3 text-success" />
-                          ) : (
-                            <VideoOff className="h-3 w-3 text-muted-foreground" />
-                          )}
+                        <div className="flex items-center gap-1.5">
+                          {participant.audio_enabled ? <Mic className="h-4 w-4 text-success" /> : <MicOff className="h-4 w-4 text-muted-foreground" />}
+                          {participant.video_enabled ? <Video className="h-4 w-4 text-success" /> : <VideoOff className="h-4 w-4 text-muted-foreground" />}
                         </div>
                       </div>
                     ))
                   )}
                 </div>
-              </ScrollArea>
-            </Card>
-          )}
+              ) : (
+                // Viewer sees instructor info
+                <div className="space-y-4">
+                  <div className="p-4 bg-gradient-to-br from-primary/10 to-accent/10 rounded-xl border border-primary/20">
+                    <div className="flex items-center gap-3 mb-3">
+                      <div className="w-14 h-14 rounded-full bg-gradient-to-br from-primary to-accent flex items-center justify-center shadow-lg shadow-primary/30">
+                        <GraduationCap className="h-7 w-7 text-white" />
+                      </div>
+                      <div>
+                        <p className="font-bold">{instructorProfile?.full_name || 'Instructor'}</p>
+                        <Badge variant="secondary" className="text-xs">Instructor</Badge>
+                      </div>
+                    </div>
+                    <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                      <span className="w-2 h-2 bg-success rounded-full animate-pulse" />
+                      Currently teaching
+                    </div>
+                  </div>
+                  
+                  <div className="text-center py-4">
+                    <p className="text-sm text-muted-foreground mb-2">Other viewers in session</p>
+                    <p className="text-2xl font-bold text-primary">{studentParticipants.length}</p>
+                  </div>
+                </div>
+              )}
+            </ScrollArea>
+          </Card>
+        </div>
 
-          {/* Notepad */}
-          <Card className="flex-1 p-4 flex flex-col bg-card/80 backdrop-blur-sm">
-            <div className="flex items-center justify-between mb-3">
-              <h3 className="font-medium text-sm flex items-center gap-2">
-                <FileText className="h-4 w-4 text-primary" />
-                Session Notes
-                <Badge variant="outline" className="text-xs">Auto-saved</Badge>
-              </h3>
+        {/* Tool Toggle Bar */}
+        <ToolToggleBar
+          showNotes={showNotes}
+          showAI={showAI}
+          showCode={showCode}
+          showChat={showChat}
+          onToggleNotes={() => setShowNotes(!showNotes)}
+          onToggleAI={() => setShowAI(!showAI)}
+          onToggleCode={() => setShowCode(!showCode)}
+          onToggleChat={() => setShowChat(!showChat)}
+        />
+
+        {/* Floating Panels */}
+        <FloatingPanel
+          title="Session Notes"
+          icon={<FileText className="h-4 w-4" />}
+          isOpen={showNotes}
+          onClose={() => setShowNotes(false)}
+          defaultPosition={{ x: 50, y: 50 }}
+          defaultSize={{ width: 350, height: 300 }}
+          glowColor="primary"
+        >
+          <div className="h-full flex flex-col">
+            <div className="flex items-center justify-between mb-2">
+              <Badge variant="outline" className="text-xs">Auto-saved</Badge>
             </div>
-            <Textarea 
+            <Textarea
               placeholder="Take notes during the session..."
               className="flex-1 resize-none border-0 focus-visible:ring-0 bg-muted/30"
               value={notes}
               onChange={(e) => setNotes(e.target.value)}
             />
-          </Card>
-        </div>
+          </div>
+        </FloatingPanel>
 
-        {/* Middle Column - Code Editor */}
-        <div className="col-span-4 flex flex-col">
-          <Card className="flex-1 p-4 flex flex-col bg-card/80 backdrop-blur-sm">
-            <div className="flex items-center justify-between mb-3">
-              <h3 className="font-medium text-sm flex items-center gap-2">
-                <Code className="h-4 w-4 text-accent" />
-                Code Editor
-              </h3>
-              <div className="flex items-center gap-2">
-                <Select value={codeLanguage} onValueChange={setCodeLanguage}>
-                  <SelectTrigger className="w-28 h-8 text-xs">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="java">Java</SelectItem>
-                    <SelectItem value="python">Python</SelectItem>
-                    <SelectItem value="javascript">JavaScript</SelectItem>
-                    <SelectItem value="c++">C++</SelectItem>
-                  </SelectContent>
-                </Select>
-                <Button 
-                  variant="default" 
-                  size="sm" 
-                  className="h-8 px-3 gap-1"
-                  onClick={handleRunCode}
-                  disabled={isRunningCode}
-                >
-                  {isRunningCode ? (
-                    <Loader2 className="h-3 w-3 animate-spin" />
-                  ) : (
-                    <Play className="h-3 w-3" />
-                  )}
-                  Run
-                </Button>
-              </div>
+        <FloatingPanel
+          title="AI Tutor"
+          icon={<Bot className="h-4 w-4" />}
+          isOpen={showAI}
+          onClose={() => setShowAI(false)}
+          defaultPosition={{ x: 100, y: 80 }}
+          defaultSize={{ width: 400, height: 400 }}
+          glowColor="accent"
+        >
+          <div className="h-full flex flex-col">
+            <div className="flex flex-wrap gap-1 mb-2">
+              {['Explain code', 'Debug help', 'Best practices'].map((action) => (
+                <button key={action} onClick={() => setAiInput(action)} className="text-xs px-2 py-1 rounded-full bg-accent/10 hover:bg-accent/20 text-accent transition-colors">
+                  {action}
+                </button>
+              ))}
+            </div>
+            
+            <div ref={aiChatRef} className="flex-1 overflow-y-auto pr-2 space-y-3">
+              {aiMessages.map((msg, idx) => (
+                <div key={idx} className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}>
+                  <div className={`max-w-[90%] rounded-xl px-3 py-2 text-sm ${
+                    msg.role === 'user' 
+                      ? 'bg-accent text-white rounded-br-sm' 
+                      : 'bg-muted border border-border rounded-bl-sm'
+                  }`}>
+                    <div className="whitespace-pre-wrap">{msg.content}</div>
+                  </div>
+                </div>
+              ))}
+              {isAiLoading && (
+                <div className="flex justify-start">
+                  <div className="bg-muted border border-border rounded-xl rounded-bl-sm px-3 py-2 text-sm flex items-center gap-2">
+                    <div className="flex gap-1">
+                      <span className="w-2 h-2 bg-accent rounded-full animate-bounce" style={{ animationDelay: '0ms' }} />
+                      <span className="w-2 h-2 bg-accent rounded-full animate-bounce" style={{ animationDelay: '150ms' }} />
+                      <span className="w-2 h-2 bg-accent rounded-full animate-bounce" style={{ animationDelay: '300ms' }} />
+                    </div>
+                  </div>
+                </div>
+              )}
+            </div>
+            
+            <div className="flex gap-2 mt-2 pt-2 border-t border-accent/20">
+              <Input
+                placeholder="Ask anything..."
+                value={aiInput}
+                onChange={(e) => setAiInput(e.target.value)}
+                onKeyPress={(e) => e.key === 'Enter' && !isAiLoading && handleAskAI()}
+                className="flex-1 text-sm"
+                disabled={isAiLoading}
+              />
+              <Button size="icon" onClick={handleAskAI} disabled={isAiLoading || !aiInput.trim()} className="bg-accent hover:bg-accent/90">
+                <Send className="h-4 w-4" />
+              </Button>
+            </div>
+          </div>
+        </FloatingPanel>
+
+        <FloatingPanel
+          title="Code Editor"
+          icon={<Code className="h-4 w-4" />}
+          isOpen={showCode}
+          onClose={() => setShowCode(false)}
+          defaultPosition={{ x: 150, y: 60 }}
+          defaultSize={{ width: 500, height: 450 }}
+          minWidth={400}
+          glowColor="success"
+        >
+          <div className="h-full flex flex-col">
+            <div className="flex items-center justify-between mb-2">
+              <Select value={codeLanguage} onValueChange={setCodeLanguage}>
+                <SelectTrigger className="w-28 h-8 text-xs">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="java">Java</SelectItem>
+                  <SelectItem value="python">Python</SelectItem>
+                  <SelectItem value="javascript">JavaScript</SelectItem>
+                  <SelectItem value="c++">C++</SelectItem>
+                </SelectContent>
+              </Select>
+              <Button variant="default" size="sm" className="h-8 px-3 gap-1 bg-success hover:bg-success/90" onClick={handleRunCode} disabled={isRunningCode}>
+                {isRunningCode ? <Loader2 className="h-3 w-3 animate-spin" /> : <Play className="h-3 w-3" />}
+                Run
+              </Button>
             </div>
             <Textarea
-              className="flex-1 bg-slate-900 text-green-400 rounded-lg p-4 font-mono text-sm resize-none border border-slate-700 focus-visible:ring-primary"
+              className="flex-1 bg-slate-900 text-green-400 rounded-lg p-3 font-mono text-sm resize-none border border-slate-700 focus-visible:ring-success"
               value={codeContent}
               onChange={(e) => setCodeContent(e.target.value)}
               spellCheck={false}
             />
             {codeOutput && (
-              <div className="mt-3 bg-slate-900 border border-slate-700 rounded-lg p-4">
-                <p className="text-xs font-semibold mb-2 text-primary flex items-center gap-2">
+              <div className="mt-2 bg-slate-900 border border-slate-700 rounded-lg p-3 max-h-24 overflow-y-auto">
+                <p className="text-xs font-semibold mb-1 text-success flex items-center gap-1">
                   <Sparkles className="h-3 w-3" />
                   Output:
                 </p>
                 <pre className="text-sm text-green-400 font-mono whitespace-pre-wrap">{codeOutput}</pre>
               </div>
             )}
-          </Card>
-        </div>
+          </div>
+        </FloatingPanel>
 
-        {/* Right Column - AI Chatbot + Session Chat */}
-        <div className="col-span-3 space-y-4 flex flex-col">
-          {/* AI Tutor Chatbot - Enhanced */}
-          <Card className="flex-1 p-4 flex flex-col bg-gradient-to-br from-primary/10 via-accent/5 to-primary/10 border-primary/30 shadow-lg shadow-primary/10">
-            <div className="flex items-center justify-between mb-3">
-              <h3 className="font-medium text-sm flex items-center gap-2">
-                <div className="relative">
-                  <Bot className="h-5 w-5 text-primary" />
-                  <span className="absolute -top-1 -right-1 w-2 h-2 bg-green-500 rounded-full animate-pulse" />
-                </div>
-                AI Tutor
-                <Badge className="bg-gradient-to-r from-primary/30 to-accent/30 text-primary text-xs border-0">
-                  <Sparkles className="h-3 w-3 mr-1" />
-                  Smart Help
-                </Badge>
-              </h3>
+        <FloatingPanel
+          title="Session Chat"
+          icon={<MessageSquare className="h-4 w-4" />}
+          isOpen={showChat}
+          onClose={() => setShowChat(false)}
+          defaultPosition={{ x: 200, y: 100 }}
+          defaultSize={{ width: 350, height: 350 }}
+          glowColor="primary"
+        >
+          <div className="h-full flex flex-col">
+            <div className="flex items-center justify-between mb-2">
+              <Badge variant="secondary" className="text-xs">{session.chat_enabled ? "Enabled" : "Disabled"}</Badge>
             </div>
             
-            {/* Quick Action Buttons */}
-            <div className="flex flex-wrap gap-1 mb-3">
-              {['Explain code', 'Debug help', 'Best practices'].map((action) => (
-                <button
-                  key={action}
-                  onClick={() => setAiInput(action)}
-                  className="text-xs px-2 py-1 rounded-full bg-primary/10 hover:bg-primary/20 text-primary transition-colors"
-                >
-                  {action}
-                </button>
+            <div ref={sessionChatRef} className="flex-1 overflow-y-auto pr-2 space-y-3">
+              {chatMessages.map((msg) => (
+                <div key={msg.id} className="space-y-1">
+                  <div className="flex items-center gap-2">
+                    <span className={`text-xs font-medium ${msg.user_id === session.instructor_id ? 'text-primary' : 'text-foreground'}`}>
+                      {msg.profiles?.full_name || "Anonymous"}
+                      {msg.user_id === session.instructor_id && <Badge variant="secondary" className="ml-1 text-[10px] py-0 px-1">Instructor</Badge>}
+                    </span>
+                    <span className="text-xs text-muted-foreground">
+                      {new Date(msg.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                    </span>
+                  </div>
+                  <p className="text-sm text-muted-foreground">{msg.message}</p>
+                </div>
               ))}
             </div>
             
-            <ScrollArea className="flex-1 pr-2">
-              <div className="space-y-3">
-                {aiMessages.map((msg, idx) => (
-                  <div key={idx} className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}>
-                    <div className={`max-w-[90%] rounded-xl px-4 py-2.5 text-sm ${
-                      msg.role === 'user' 
-                        ? 'bg-primary text-primary-foreground rounded-br-sm' 
-                        : 'bg-card border border-border shadow-sm rounded-bl-sm'
-                    }`}>
-                      <div className="whitespace-pre-wrap">{msg.content}</div>
-                    </div>
-                  </div>
-                ))}
-                {isAiLoading && (
-                  <div className="flex justify-start">
-                    <div className="bg-card border border-border rounded-xl rounded-bl-sm px-4 py-2.5 text-sm flex items-center gap-2 shadow-sm">
-                      <div className="flex gap-1">
-                        <span className="w-2 h-2 bg-primary rounded-full animate-bounce" style={{ animationDelay: '0ms' }} />
-                        <span className="w-2 h-2 bg-primary rounded-full animate-bounce" style={{ animationDelay: '150ms' }} />
-                        <span className="w-2 h-2 bg-primary rounded-full animate-bounce" style={{ animationDelay: '300ms' }} />
-                      </div>
-                      <span className="text-muted-foreground">Thinking...</span>
-                    </div>
-                  </div>
-                )}
-              </div>
-            </ScrollArea>
-            
-            <div className="flex gap-2 mt-3 pt-3 border-t border-primary/20">
-              <Input
-                placeholder="Ask anything about programming..."
-                value={aiInput}
-                onChange={(e) => setAiInput(e.target.value)}
-                onKeyPress={(e) => e.key === 'Enter' && !isAiLoading && handleAskAI()}
-                className="flex-1 bg-background/70 border-primary/20 focus:border-primary/50"
-                disabled={isAiLoading}
-              />
-              <Button 
-                size="icon" 
-                variant="default" 
-                onClick={handleAskAI}
-                disabled={isAiLoading || !aiInput.trim()}
-                className="bg-primary hover:bg-primary/90 shadow-lg shadow-primary/20"
-              >
-                <Send className="h-4 w-4" />
-              </Button>
-            </div>
-          </Card>
-
-          {/* Session Chat */}
-          <Card className="flex-1 p-4 flex flex-col bg-card/80 backdrop-blur-sm">
-            <div className="flex items-center justify-between mb-3">
-              <h3 className="font-medium text-sm flex items-center gap-2">
-                <MessageSquare className="h-4 w-4 text-accent" />
-                Session Chat
-              </h3>
-              <Badge variant="secondary" className="text-xs">
-                {session.chat_enabled ? "Enabled" : "Disabled"}
-              </Badge>
-            </div>
-            
-            <ScrollArea className="flex-1 pr-2">
-              <div className="space-y-3">
-                {chatMessages.map((msg) => (
-                  <div key={msg.id} className="space-y-1">
-                    <div className="flex items-center gap-2">
-                      <span className={`text-xs font-medium ${
-                        msg.user_id === session.instructor_id ? 'text-primary' : 'text-foreground'
-                      }`}>
-                        {msg.profiles?.full_name || "Anonymous"}
-                      </span>
-                      <span className="text-xs text-muted-foreground">
-                        {new Date(msg.created_at).toLocaleTimeString([], { 
-                          hour: '2-digit', 
-                          minute: '2-digit' 
-                        })}
-                      </span>
-                    </div>
-                    <p className="text-sm text-muted-foreground">{msg.message}</p>
-                  </div>
-                ))}
-              </div>
-            </ScrollArea>
-            
-            <div className="flex gap-2 mt-3 pt-3 border-t">
+            <div className="flex gap-2 mt-2 pt-2 border-t">
               <Input
                 placeholder={session.chat_enabled ? "Send a message..." : "Chat disabled"}
                 value={message}
                 onChange={(e) => setMessage(e.target.value)}
                 onKeyPress={(e) => e.key === 'Enter' && handleSendMessage()}
-                className="flex-1"
+                className="flex-1 text-sm"
                 disabled={!session.chat_enabled}
               />
-              <Button 
-                size="icon" 
-                variant="default" 
-                onClick={handleSendMessage}
-                disabled={!session.chat_enabled}
-              >
+              <Button size="icon" onClick={handleSendMessage} disabled={!session.chat_enabled}>
                 <Send className="h-4 w-4" />
               </Button>
             </div>
-          </Card>
-        </div>
+          </div>
+        </FloatingPanel>
       </div>
     </div>
   );
