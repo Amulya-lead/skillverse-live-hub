@@ -26,7 +26,11 @@ import {
   Play,
   Sparkles,
   GraduationCap,
-  Zap
+  Zap,
+  Monitor,
+  MonitorOff,
+  Volume2,
+  VolumeX
 } from "lucide-react";
 import {
   Dialog,
@@ -87,6 +91,8 @@ const LiveSession = () => {
   const navigate = useNavigate();
   const { toast } = useToast();
   const videoRef = useRef<HTMLVideoElement>(null);
+  const screenRef = useRef<HTMLVideoElement>(null);
+  const viewerVideoRef = useRef<HTMLVideoElement>(null);
   const aiChatRef = useRef<HTMLDivElement>(null);
   const sessionChatRef = useRef<HTMLDivElement>(null);
   
@@ -98,8 +104,11 @@ const LiveSession = () => {
   
   const [isMuted, setIsMuted] = useState(false);
   const [isVideoOff, setIsVideoOff] = useState(false);
+  const [isScreenSharing, setIsScreenSharing] = useState(false);
+  const [isSpeakerMuted, setIsSpeakerMuted] = useState(false);
   const [message, setMessage] = useState("");
   const [stream, setStream] = useState<MediaStream | null>(null);
+  const [screenStream, setScreenStream] = useState<MediaStream | null>(null);
   const [codeOutput, setCodeOutput] = useState("");
   const [notes, setNotes] = useState("");
   const [codeLanguage, setCodeLanguage] = useState("java");
@@ -159,7 +168,9 @@ const LiveSession = () => {
     if (loading) return;
     
     if (isViewer) {
-      console.log("Viewer mode - no media access needed");
+      console.log("Viewer mode - setting up to receive instructor stream");
+      // For viewers, we simulate receiving instructor's stream
+      // In production, this would use WebRTC/mediasoup
       return;
     }
     
@@ -203,6 +214,17 @@ const LiveSession = () => {
       };
     }
   }, [stream]);
+
+  // Handle screen stream connection
+  useEffect(() => {
+    if (screenStream && screenRef.current) {
+      console.log("Connecting screen stream to element");
+      screenRef.current.srcObject = screenStream;
+      screenRef.current.onloadedmetadata = () => {
+        screenRef.current?.play().catch(console.error);
+      };
+    }
+  }, [screenStream]);
 
   useEffect(() => {
     const initSession = async () => {
@@ -312,11 +334,14 @@ const LiveSession = () => {
     };
   }, [id]);
 
-  // Cleanup stream on unmount
+  // Cleanup streams on unmount
   useEffect(() => {
     return () => {
       if (stream) {
         stream.getTracks().forEach(track => track.stop());
+      }
+      if (screenStream) {
+        screenStream.getTracks().forEach(track => track.stop());
       }
       
       if (currentUserId && id) {
@@ -328,7 +353,7 @@ const LiveSession = () => {
           .then();
       }
     };
-  }, [stream, currentUserId, id]);
+  }, [stream, screenStream, currentUserId, id]);
 
   // Auto-save notes every 5 seconds
   useEffect(() => {
@@ -422,11 +447,59 @@ const LiveSession = () => {
     if (stream) {
       stream.getTracks().forEach(track => track.stop());
     }
+    if (screenStream) {
+      screenStream.getTracks().forEach(track => track.stop());
+    }
 
     await supabase.from("session_participants").update({ status: "left", left_at: new Date().toISOString() }).eq("session_id", id).eq("user_id", currentUserId);
 
     toast({ title: "Session Ended", description: "You have left the session" });
     navigate("/dashboard");
+  };
+
+  // Screen sharing toggle for instructor
+  const toggleScreenShare = async () => {
+    if (isScreenSharing) {
+      // Stop screen sharing
+      if (screenStream) {
+        screenStream.getTracks().forEach(track => track.stop());
+        setScreenStream(null);
+      }
+      setIsScreenSharing(false);
+      toast({ title: "Screen Sharing Stopped", description: "Your screen is no longer being shared" });
+    } else {
+      // Start screen sharing
+      try {
+        const displayStream = await navigator.mediaDevices.getDisplayMedia({
+          video: true,
+          audio: true
+        });
+        
+        setScreenStream(displayStream);
+        setIsScreenSharing(true);
+        
+        // Handle when user stops sharing via browser controls
+        displayStream.getVideoTracks()[0].onended = () => {
+          setScreenStream(null);
+          setIsScreenSharing(false);
+          toast({ title: "Screen Sharing Stopped" });
+        };
+        
+        toast({ title: "Screen Sharing Started", description: "Students can now see your screen/PPT" });
+      } catch (error) {
+        console.error("Screen share error:", error);
+        toast({ title: "Screen Share Failed", description: "Could not start screen sharing", variant: "destructive" });
+      }
+    }
+  };
+
+  // Toggle speaker for viewers
+  const toggleSpeaker = () => {
+    setIsSpeakerMuted(!isSpeakerMuted);
+    if (viewerVideoRef.current) {
+      viewerVideoRef.current.muted = !isSpeakerMuted;
+    }
+    toast({ title: isSpeakerMuted ? "Sound On" : "Sound Muted" });
   };
 
   const handleRunCode = async () => {
@@ -624,74 +697,138 @@ const LiveSession = () => {
       <div className="flex-1 relative p-6 overflow-hidden">
         {/* Center Video Area */}
         <div className="flex flex-col lg:flex-row gap-6 h-full max-w-6xl mx-auto">
-          {/* Main Video */}
-          <Card className="flex-1 relative aspect-video bg-black rounded-2xl overflow-hidden shadow-2xl border-2 border-primary/20 group">
-            <div className="absolute inset-0 bg-gradient-to-t from-black/50 via-transparent to-transparent z-10" />
-            
-            {isInstructor ? (
-              <>
-                <video
-                  ref={videoRef}
-                  autoPlay
-                  playsInline
-                  muted
-                  className={`w-full h-full object-cover ${isVideoOff ? 'hidden' : ''}`}
-                  style={{ transform: 'scaleX(-1)' }}
-                />
-                {isVideoOff && (
-                  <div className="absolute inset-0 bg-gradient-to-br from-slate-800 to-slate-900 flex items-center justify-center">
-                    <div className="text-center">
-                      <div className="w-28 h-28 rounded-full bg-gradient-to-br from-primary/30 to-accent/30 flex items-center justify-center mx-auto mb-4 animate-pulse shadow-2xl shadow-primary/30">
-                        <VideoOff className="h-14 w-14 text-primary" />
-                      </div>
-                      <p className="text-white font-medium">Camera Off</p>
+          {/* Main Video/Screen Area */}
+          <div className="flex-1 flex flex-col gap-4">
+            {/* Primary Display - Screen Share or Video */}
+            <Card className="flex-1 relative bg-black rounded-2xl overflow-hidden shadow-2xl border-2 border-primary/20 group">
+              <div className="absolute inset-0 bg-gradient-to-t from-black/50 via-transparent to-transparent z-10" />
+              
+              {isInstructor ? (
+                <>
+                  {/* Screen Share Display (when sharing) */}
+                  {isScreenSharing && screenStream ? (
+                    <video
+                      ref={screenRef}
+                      autoPlay
+                      playsInline
+                      muted
+                      className="w-full h-full object-contain bg-black"
+                    />
+                  ) : (
+                    <>
+                      <video
+                        ref={videoRef}
+                        autoPlay
+                        playsInline
+                        muted
+                        className={`w-full h-full object-cover ${isVideoOff ? 'hidden' : ''}`}
+                        style={{ transform: 'scaleX(-1)' }}
+                      />
+                      {isVideoOff && (
+                        <div className="absolute inset-0 bg-gradient-to-br from-slate-800 to-slate-900 flex items-center justify-center">
+                          <div className="text-center">
+                            <div className="w-28 h-28 rounded-full bg-gradient-to-br from-primary/30 to-accent/30 flex items-center justify-center mx-auto mb-4 animate-pulse shadow-2xl shadow-primary/30">
+                              <VideoOff className="h-14 w-14 text-primary" />
+                            </div>
+                            <p className="text-white font-medium">Camera Off</p>
+                          </div>
+                        </div>
+                      )}
+                    </>
+                  )}
+                  
+                  {/* Instructor Controls */}
+                  <div className="absolute bottom-6 left-1/2 -translate-x-1/2 z-20 flex items-center gap-3 bg-background/90 backdrop-blur-xl rounded-2xl px-6 py-3 shadow-2xl border border-border/50 opacity-0 group-hover:opacity-100 transition-opacity">
+                    <Button variant={isMuted ? "destructive" : "secondary"} size="icon" className="rounded-xl h-12 w-12" onClick={toggleMute} title="Toggle Microphone">
+                      {isMuted ? <MicOff className="h-5 w-5" /> : <Mic className="h-5 w-5" />}
+                    </Button>
+                    <Button variant={isVideoOff ? "destructive" : "secondary"} size="icon" className="rounded-xl h-12 w-12" onClick={toggleVideo} title="Toggle Camera">
+                      {isVideoOff ? <VideoOff className="h-5 w-5" /> : <Video className="h-5 w-5" />}
+                    </Button>
+                    <div className="w-px h-8 bg-border" />
+                    <Button variant={isScreenSharing ? "destructive" : "default"} size="icon" className="rounded-xl h-12 w-12" onClick={toggleScreenShare} title="Share Screen/PPT">
+                      {isScreenSharing ? <MonitorOff className="h-5 w-5" /> : <Monitor className="h-5 w-5" />}
+                    </Button>
+                  </div>
+                  
+                  {/* Small self-view when screen sharing */}
+                  {isScreenSharing && !isVideoOff && (
+                    <div className="absolute bottom-20 right-4 w-40 h-28 rounded-xl overflow-hidden border-2 border-primary/50 shadow-xl z-30">
+                      <video
+                        ref={videoRef}
+                        autoPlay
+                        playsInline
+                        muted
+                        className="w-full h-full object-cover"
+                        style={{ transform: 'scaleX(-1)' }}
+                      />
                     </div>
-                  </div>
-                )}
-                
-                {/* Instructor Controls */}
-                <div className="absolute bottom-6 left-1/2 -translate-x-1/2 z-20 flex items-center gap-3 bg-background/90 backdrop-blur-xl rounded-2xl px-6 py-3 shadow-2xl border border-border/50 opacity-0 group-hover:opacity-100 transition-opacity">
-                  <Button variant={isMuted ? "destructive" : "secondary"} size="icon" className="rounded-xl h-12 w-12" onClick={toggleMute}>
-                    {isMuted ? <MicOff className="h-5 w-5" /> : <Mic className="h-5 w-5" />}
-                  </Button>
-                  <Button variant={isVideoOff ? "destructive" : "secondary"} size="icon" className="rounded-xl h-12 w-12" onClick={toggleVideo}>
-                    {isVideoOff ? <VideoOff className="h-5 w-5" /> : <Video className="h-5 w-5" />}
-                  </Button>
-                </div>
-              </>
-            ) : (
-              <div className="absolute inset-0 bg-gradient-to-br from-slate-800 via-slate-900 to-black flex items-center justify-center">
-                <div className="text-center">
-                  <div className="w-32 h-32 rounded-full bg-gradient-to-br from-primary/40 to-accent/40 flex items-center justify-center mx-auto mb-6 ring-4 ring-primary/30 shadow-2xl shadow-primary/30 animate-pulse">
-                    <GraduationCap className="h-16 w-16 text-primary" />
-                  </div>
-                  <p className="text-white font-bold text-xl mb-1">{instructorProfile?.full_name || 'Instructor'}</p>
-                  <p className="text-muted-foreground text-sm">Teaching Live</p>
-                </div>
-              </div>
-            )}
-            
-            {/* Live Indicator */}
-            <div className="absolute top-4 left-4 z-20 flex items-center gap-2 bg-destructive/90 text-destructive-foreground px-4 py-2 rounded-full text-sm font-medium shadow-lg shadow-destructive/40">
-              <span className="w-2.5 h-2.5 bg-white rounded-full animate-pulse" />
-              LIVE
-            </div>
-            
-            {/* Role Badge */}
-            <div className="absolute top-4 right-4 z-20">
-              {isViewer ? (
-                <Badge className="bg-accent/90 text-white border-0 shadow-lg shadow-accent/30">
-                  <Users className="h-3 w-3 mr-1" />
-                  Viewing
-                </Badge>
+                  )}
+                </>
               ) : (
-                <Badge className="bg-primary/90 text-white border-0 shadow-lg shadow-primary/30">
-                  <GraduationCap className="h-3 w-3 mr-1" />
-                  Broadcasting
-                </Badge>
+                // Viewer sees instructor's stream simulation
+                <div className="absolute inset-0 bg-gradient-to-br from-slate-800 via-slate-900 to-black flex items-center justify-center">
+                  <div className="text-center">
+                    <div className="w-32 h-32 rounded-full bg-gradient-to-br from-primary/40 to-accent/40 flex items-center justify-center mx-auto mb-6 ring-4 ring-primary/30 shadow-2xl shadow-primary/30 animate-pulse">
+                      <GraduationCap className="h-16 w-16 text-primary" />
+                    </div>
+                    <p className="text-white font-bold text-xl mb-1">{instructorProfile?.full_name || 'Instructor'}</p>
+                    <p className="text-muted-foreground text-sm mb-4">Teaching Live</p>
+                    <div className="flex items-center justify-center gap-4 text-sm">
+                      <div className="flex items-center gap-1 text-success">
+                        <Video className="h-4 w-4" />
+                        <span>Video On</span>
+                      </div>
+                      <div className="flex items-center gap-1 text-success">
+                        <Volume2 className="h-4 w-4" />
+                        <span>Audio On</span>
+                      </div>
+                    </div>
+                    <p className="text-xs text-muted-foreground mt-4 px-8">
+                      Note: Full video streaming requires WebRTC integration. <br />
+                      In production, you would see the instructor's live video here.
+                    </p>
+                  </div>
+                  
+                  {/* Viewer Speaker Control */}
+                  <div className="absolute bottom-6 left-1/2 -translate-x-1/2 z-20 flex items-center gap-3 bg-background/90 backdrop-blur-xl rounded-2xl px-6 py-3 shadow-2xl border border-border/50 opacity-0 group-hover:opacity-100 transition-opacity">
+                    <Button variant={isSpeakerMuted ? "destructive" : "secondary"} size="icon" className="rounded-xl h-12 w-12" onClick={toggleSpeaker} title="Toggle Speaker">
+                      {isSpeakerMuted ? <VolumeX className="h-5 w-5" /> : <Volume2 className="h-5 w-5" />}
+                    </Button>
+                  </div>
+                </div>
               )}
-            </div>
-          </Card>
+              
+              {/* Live Indicator */}
+              <div className="absolute top-4 left-4 z-20 flex items-center gap-2 bg-destructive/90 text-destructive-foreground px-4 py-2 rounded-full text-sm font-medium shadow-lg shadow-destructive/40">
+                <span className="w-2.5 h-2.5 bg-white rounded-full animate-pulse" />
+                LIVE
+              </div>
+              
+              {/* Screen Share Indicator */}
+              {isScreenSharing && isInstructor && (
+                <div className="absolute top-4 left-28 z-20 flex items-center gap-2 bg-success/90 text-white px-4 py-2 rounded-full text-sm font-medium shadow-lg shadow-success/40">
+                  <Monitor className="h-4 w-4" />
+                  Sharing Screen
+                </div>
+              )}
+              
+              {/* Role Badge */}
+              <div className="absolute top-4 right-4 z-20">
+                {isViewer ? (
+                  <Badge className="bg-accent/90 text-white border-0 shadow-lg shadow-accent/30">
+                    <Users className="h-3 w-3 mr-1" />
+                    Viewing
+                  </Badge>
+                ) : (
+                  <Badge className="bg-primary/90 text-white border-0 shadow-lg shadow-primary/30">
+                    <GraduationCap className="h-3 w-3 mr-1" />
+                    Broadcasting
+                  </Badge>
+                )}
+              </div>
+            </Card>
+          </div>
 
           {/* Participants Panel */}
           <Card className="w-full lg:w-80 p-4 bg-card/80 backdrop-blur-xl border-border/50 shadow-xl">
