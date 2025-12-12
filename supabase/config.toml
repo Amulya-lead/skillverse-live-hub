@@ -14,3 +14,6 @@ verify_jwt = false
 
 [functions.verify-razorpay-payment]
 verify_jwt = false
+
+[functions.webrtc-signaling]
+verify_jwt = false
