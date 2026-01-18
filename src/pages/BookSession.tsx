@@ -8,11 +8,28 @@ import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
 import { Label } from "@/components/ui/label";
 import { useToast } from "@/hooks/use-toast";
 import { supabase } from "@/integrations/supabase/client";
+import { format } from "date-fns";
 
 declare global {
   interface Window {
     Razorpay: any;
   }
+}
+
+interface CourseData {
+  id: string;
+  title: string;
+  price: number;
+  instructor: string;
+  booking_type: 'standard' | 'slot_based' | string;
+}
+
+interface SlotData {
+  id: string;
+  course_id: string;
+  start_time: string;
+  end_time: string;
+  is_available: boolean;
 }
 
 const BookSession = () => {
@@ -26,23 +43,9 @@ const BookSession = () => {
   const [userId, setUserId] = useState("");
   const [razorpayLoaded, setRazorpayLoaded] = useState(false);
 
-  // Mock data - would come from API
-  const course = {
-    id: id || "course-1",
-    title: "4 Hours of OOPS in Java",
-    price: 999,
-    priceDisplay: "₹999",
-    instructor: "Rahul Sharma",
-  };
-
-  const availableSlots = [
-    { id: "1", date: "Monday, Nov 11", time: "10:00 AM - 2:00 PM", available: true },
-    { id: "2", date: "Monday, Nov 11", time: "3:00 PM - 7:00 PM", available: true },
-    { id: "3", date: "Tuesday, Nov 12", time: "10:00 AM - 2:00 PM", available: false },
-    { id: "4", date: "Tuesday, Nov 12", time: "3:00 PM - 7:00 PM", available: true },
-    { id: "5", date: "Wednesday, Nov 13", time: "10:00 AM - 2:00 PM", available: true },
-    { id: "6", date: "Wednesday, Nov 13", time: "3:00 PM - 7:00 PM", available: true },
-  ];
+  const [course, setCourse] = useState<CourseData | null>(null);
+  const [availableSlots, setAvailableSlots] = useState<SlotData[]>([]);
+  const [loading, setLoading] = useState(true);
 
   useEffect(() => {
     // Load Razorpay script
@@ -69,8 +72,61 @@ const BookSession = () => {
     fetchUserDetails();
   }, []);
 
+  useEffect(() => {
+    const fetchSessionData = async () => {
+      if (!id) return;
+
+      try {
+        // Fetch course details
+        const { data: courseData, error: courseError } = await supabase
+          .from('courses')
+          .select('id, title, price, instructor, booking_type')
+          .eq('id', id)
+          .single();
+
+        if (courseError) throw courseError;
+        setCourse(courseData);
+
+        // Fetch slots
+        const { data: slotsData, error: slotsError } = await supabase
+          .from('course_slots')
+          .select('*')
+          .eq('course_id', id)
+          .order('start_time');
+
+        if (slotsError) throw slotsError;
+
+        // Filter slots to only show future slots if needed, but for now show all fetched
+        setAvailableSlots(slotsData || []);
+
+      } catch (error) {
+        console.error('Error fetching session data:', error);
+        toast({
+          title: "Error",
+          description: "Failed to load session details.",
+          variant: "destructive",
+        });
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    fetchSessionData();
+  }, [id, toast]);
+
+  const formatSlotDate = (dateString: string) => {
+    return format(new Date(dateString), "EEEE, MMM d");
+  };
+
+  const formatSlotTime = (start: string, end: string) => {
+    return `${format(new Date(start), "h:mm a")} - ${format(new Date(end), "h:mm a")}`;
+  };
+
   const handleBooking = async () => {
-    if (!selectedSlot) {
+    if (!course) return;
+
+    // Validation
+    if (course.booking_type === 'slot_based' && !selectedSlot) {
       toast({
         title: "Please select a time slot",
         description: "Choose an available slot to continue",
@@ -82,6 +138,54 @@ const BookSession = () => {
     setIsBooking(true);
     const selectedSlotData = availableSlots.find(s => s.id === selectedSlot);
 
+    if (course.booking_type === 'slot_based' && !selectedSlotData) {
+      setIsBooking(false);
+      return;
+    }
+
+    const processBooking = async () => {
+      try {
+        let error;
+
+        if (course.booking_type === 'slot_based') {
+          // Call the secure RPC function to handle session creation and joining for slots
+          const { error: bookingError } = await supabase.rpc('book_course_slot', {
+            p_course_id: course.id,
+            p_user_id: userId,
+            p_start_time: selectedSlotData?.start_time,
+            p_end_time: selectedSlotData?.end_time
+          });
+          error = bookingError;
+        } else {
+          // Standard/Recorded course - just enroll
+          const { error: enrollError } = await supabase.rpc('enroll_course', {
+            p_course_id: course.id,
+            p_user_id: userId
+          });
+          error = enrollError;
+        }
+
+        if (error) throw error;
+
+        await sendConfirmationEmail(selectedSlotData);
+        toast({
+          title: "Booking Confirmed! 🎉",
+          description: course.booking_type === 'slot_based' ? "Session booked successfully! Check your dashboard." : "Course Enrolled! Check My Courses.",
+        });
+        setTimeout(() => navigate("/dashboard?tab=" + (course.booking_type === 'slot_based' ? 'sessions' : 'courses')), 2000);
+
+      } catch (error: any) {
+        console.error("Error processing booking:", error);
+        toast({
+          title: "Booking Error",
+          description: "There was an issue processing your booking. Please try again.",
+          variant: "destructive",
+        });
+      } finally {
+        setIsBooking(false);
+      }
+    };
+
     try {
       // Create Razorpay order
       const { data: orderData, error: orderError } = await supabase.functions.invoke("create-razorpay-order", {
@@ -92,15 +196,14 @@ const BookSession = () => {
           courseName: course.title,
           userId: userId,
           userEmail: userEmail,
-          sessionDate: selectedSlotData?.date || "",
-          sessionTime: selectedSlotData?.time || "",
+          sessionDate: selectedSlotData ? formatSlotDate(selectedSlotData.start_time) : "Standard Course",
+          sessionTime: selectedSlotData ? formatSlotTime(selectedSlotData.start_time, selectedSlotData.end_time) : "Lifetime Access",
         },
       });
 
       if (orderError || !orderData?.configured) {
-        // Fallback: Book without payment if Razorpay not configured
         console.log("Razorpay not configured, proceeding with direct booking");
-        await completeBookingWithoutPayment(selectedSlotData);
+        await processBooking();
         return;
       }
 
@@ -121,8 +224,8 @@ const BookSession = () => {
               razorpay_signature: response.razorpay_signature,
               courseId: course.id,
               userId: userId,
-              sessionDate: selectedSlotData?.date || "",
-              sessionTime: selectedSlotData?.time || "",
+              sessionDate: selectedSlotData ? formatSlotDate(selectedSlotData.start_time) : "Standard Course",
+              sessionTime: selectedSlotData ? formatSlotTime(selectedSlotData.start_time, selectedSlotData.end_time) : "Lifetime Access",
             },
           });
 
@@ -136,15 +239,7 @@ const BookSession = () => {
             return;
           }
 
-          // Send confirmation email
-          await sendConfirmationEmail(selectedSlotData);
-          
-          toast({
-            title: "Payment Successful! 🎉",
-            description: "Your session has been booked. Check your email for details.",
-          });
-          
-          setTimeout(() => navigate("/dashboard"), 2000);
+          await processBooking();
         },
         prefill: {
           name: userName,
@@ -154,7 +249,7 @@ const BookSession = () => {
           color: "#8b5cf6",
         },
         modal: {
-          ondismiss: function() {
+          ondismiss: function () {
             setIsBooking(false);
           }
         }
@@ -182,9 +277,9 @@ const BookSession = () => {
       await sendConfirmationEmail(selectedSlotData);
       toast({
         title: "Booking Confirmed! 🎉",
-        description: "Check your email for confirmation and session details",
+        description: course?.booking_type === 'slot_based' ? "Session booked successfully! Check your dashboard." : "Course Enrolled! Check My Courses.",
       });
-      setTimeout(() => navigate("/dashboard"), 2000);
+      setTimeout(() => navigate("/dashboard?tab=" + (course?.booking_type === 'slot_based' ? 'sessions' : 'courses')), 2000);
     } catch (error) {
       console.error("Error:", error);
       toast({
@@ -198,42 +293,56 @@ const BookSession = () => {
   };
 
   const sendConfirmationEmail = async (selectedSlotData: any) => {
+    if (!course) return;
+
     await supabase.functions.invoke("send-booking-confirmation", {
       body: {
         userEmail,
         userName,
         courseName: course.title,
         instructor: course.instructor,
-        sessionDate: selectedSlotData?.date || "",
-        sessionTime: selectedSlotData?.time || "",
-        price: course.priceDisplay,
+        sessionDate: selectedSlotData ? formatSlotDate(selectedSlotData.start_time) : "Standard Course",
+        sessionTime: selectedSlotData ? formatSlotTime(selectedSlotData.start_time, selectedSlotData.end_time) : "Lifetime Access",
+        price: `₹${course.price}`,
       },
     });
   };
 
-  return (
-    <div className="min-h-screen bg-gradient-hero relative overflow-hidden">
-      {/* Animated Background Elements */}
-      <div className="absolute inset-0 overflow-hidden pointer-events-none">
-        <div className="absolute top-20 left-10 w-72 h-72 bg-primary/10 rounded-full blur-3xl animate-float" />
-        <div className="absolute top-40 right-20 w-96 h-96 bg-accent/10 rounded-full blur-3xl animate-float" style={{ animationDelay: '1s' }} />
-        <div className="absolute bottom-20 left-1/3 w-80 h-80 bg-primary/5 rounded-full blur-3xl animate-float" style={{ animationDelay: '2s' }} />
-        
-        {/* Glowing orbs */}
-        <div className="absolute top-1/4 left-1/4 w-4 h-4 bg-primary rounded-full animate-pulse shadow-glow" />
-        <div className="absolute top-1/3 right-1/3 w-3 h-3 bg-accent rounded-full animate-pulse shadow-glow" style={{ animationDelay: '0.5s' }} />
-        <div className="absolute bottom-1/4 right-1/4 w-5 h-5 bg-primary/80 rounded-full animate-pulse shadow-glow" style={{ animationDelay: '1s' }} />
-        
-        {/* Grid pattern overlay */}
-        <div className="absolute inset-0 bg-[linear-gradient(rgba(139,92,246,0.03)_1px,transparent_1px),linear-gradient(90deg,rgba(139,92,246,0.03)_1px,transparent_1px)] bg-[size:50px_50px]" />
+  if (loading) {
+    return (
+      <div className="min-h-screen bg-gradient-hero flex items-center justify-center">
+        <Loader2 className="h-12 w-12 animate-spin text-primary" />
       </div>
+    );
+  }
+
+  if (!course) {
+    return (
+      <div className="min-h-screen bg-gradient-hero flex flex-col items-center justify-center gap-4">
+        <h1 className="text-2xl font-bold">Course not found</h1>
+        <Link to="/courses">
+          <Button>Back to Courses</Button>
+        </Link>
+      </div>
+    );
+  }
+
+  return (
+    <div className="min-h-screen bg-background relative overflow-hidden">
+      {/* Background Ambience */}
+      <div className="absolute inset-0 bg-[radial-gradient(ellipse_at_top,_var(--tw-gradient-stops))] from-primary/10 via-background to-background" />
+      <div className="absolute top-0 right-0 w-[800px] h-[800px] bg-primary/5 rounded-full blur-[120px] animate-pulse opacity-50" />
+      <div className="absolute bottom-0 left-0 w-[600px] h-[600px] bg-accent/5 rounded-full blur-[100px] animate-pulse opacity-50" />
+
+      {/* Grid pattern */}
+      <div className="absolute inset-0 bg-[linear-gradient(rgba(0,0,0,0.02)_1px,transparent_1px),linear-gradient(90deg,rgba(0,0,0,0.02)_1px,transparent_1px)] bg-[size:60px_60px] pointer-events-none" />
 
       {/* Header */}
-      <div className="bg-background/80 backdrop-blur-lg border-b border-border/50 sticky top-0 z-50">
+      <div className="bg-background/60 backdrop-blur-xl border-b border-white/10 sticky top-0 z-50 shadow-sm">
         <div className="container mx-auto px-4 py-4">
           <Link to={`/course/${id}`}>
-            <Button variant="ghost" size="sm" className="hover:bg-primary/10 transition-all duration-300">
-              <ArrowLeft className="h-4 w-4 mr-2" />
+            <Button variant="ghost" size="sm" className="hover:bg-primary/5 transition-all duration-300 group">
+              <ArrowLeft className="h-4 w-4 mr-2 group-hover:-translate-x-1 transition-transform" />
               Back to Course
             </Button>
           </Link>
@@ -241,194 +350,194 @@ const BookSession = () => {
       </div>
 
       <div className="container mx-auto px-4 py-12 relative z-10">
-        <div className="max-w-5xl mx-auto">
-          {/* Page Header with Glow */}
-          <div className="text-center mb-12 animate-fade-in">
-            <div className="inline-flex items-center gap-2 px-4 py-2 bg-primary/10 rounded-full mb-4 border border-primary/20">
+        <div className="max-w-6xl mx-auto">
+          {/* Page Header */}
+          <div className="text-center mb-16 animate-fade-in-up">
+            <div className="inline-flex items-center gap-2 px-6 py-2 bg-gradient-to-r from-primary/10 to-transparent rounded-full mb-6 border border-primary/20 shadow-sm">
               <Sparkles className="h-4 w-4 text-primary animate-pulse" />
-              <span className="text-sm font-medium text-primary">Live Session Booking</span>
+              <span className="text-sm font-bold text-primary tracking-wide uppercase">
+                {course.booking_type === 'slot_based' ? 'Live Session Booking' : 'Course Enrollment'}
+              </span>
             </div>
-            <h1 className="text-4xl md:text-5xl font-bold mb-3 bg-gradient-to-r from-foreground via-primary to-accent bg-clip-text text-transparent">
-              Book Your Live Session
+            <h1 className="text-4xl md:text-6xl font-black mb-4 tracking-tight drop-shadow-sm">
+              {course.booking_type === 'slot_based' ? 'Book Your Live Session' : 'Secure Your Spot'}
             </h1>
-            <p className="text-muted-foreground text-lg max-w-xl mx-auto">
-              Choose a convenient time slot and start your learning journey with expert instructors
+            <p className="text-muted-foreground text-xl max-w-2xl mx-auto font-light leading-relaxed">
+              {course.booking_type === 'slot_based'
+                ? 'Choose a convenient time slot and start your learning journey with expert instructors'
+                : 'Get instant access to comprehensive learning materials and expert guidance'}
             </p>
           </div>
 
           <div className="grid lg:grid-cols-3 gap-8">
             {/* Slot Selection */}
-            <div className="lg:col-span-2 space-y-6">
-              <Card className="border-2 border-border/50 bg-card/80 backdrop-blur-sm shadow-strong overflow-hidden">
-                <div className="absolute top-0 left-0 right-0 h-1 bg-gradient-primary" />
-                <CardHeader className="pb-4">
-                  <CardTitle className="flex items-center gap-3 text-xl">
-                    <div className="p-2 bg-primary/10 rounded-lg">
-                      <Calendar className="h-5 w-5 text-primary" />
+            {course.booking_type === 'slot_based' ? (
+              <div className="lg:col-span-2 space-y-8 animate-fade-in" style={{ animationDelay: '0.2s' }}>
+                <div className="glass-card rounded-3xl p-8 border border-white/40 shadow-soft relative overflow-hidden">
+                  <div className="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-transparent via-primary/50 to-transparent opacity-50" />
+
+                  <div className="flex items-center gap-4 mb-8">
+                    <div className="p-3 bg-gradient-to-br from-primary/20 to-primary/5 rounded-2xl shadow-sm">
+                      <Calendar className="h-6 w-6 text-primary" />
                     </div>
-                    Select Your Preferred Time Slot
-                  </CardTitle>
-                </CardHeader>
-                <CardContent>
+                    <div>
+                      <h2 className="text-2xl font-bold">Select a Time Slot</h2>
+                      <p className="text-muted-foreground text-sm">All times are in your local timezone</p>
+                    </div>
+                  </div>
+
                   <RadioGroup value={selectedSlot} onValueChange={setSelectedSlot}>
-                    <div className="space-y-4">
-                      {availableSlots.map((slot, index) => (
-                        <div 
-                          key={slot.id} 
-                          className="relative group animate-fade-in"
-                          style={{ animationDelay: `${index * 0.1}s` }}
-                        >
-                          {/* Glow effect on hover */}
-                          <div className={`absolute -inset-0.5 bg-gradient-primary rounded-xl opacity-0 group-hover:opacity-30 blur-sm transition-all duration-500 ${selectedSlot === slot.id ? 'opacity-40' : ''}`} />
-                          
-                          <Card className={`relative hover:shadow-strong transition-all duration-500 hover:-translate-y-1 border-2 ${
-                            !slot.available
-                              ? "opacity-50 cursor-not-allowed bg-muted/20"
-                              : selectedSlot === slot.id
-                              ? "border-primary bg-primary/5 shadow-glow"
-                              : "border-border/50 hover:border-primary/50 cursor-pointer bg-card/50"
-                          }`}>
-                            <div className="flex items-center justify-between p-5">
-                              <div className="flex items-center gap-4">
-                                <RadioGroupItem
-                                  value={slot.id}
-                                  id={slot.id}
-                                  disabled={!slot.available}
-                                  className="border-2 h-5 w-5"
-                                />
-                                <Label
-                                  htmlFor={slot.id}
-                                  className={`cursor-pointer ${!slot.available && "cursor-not-allowed"}`}
-                                >
-                                  <div className="font-semibold text-lg">{slot.date}</div>
-                                  <div className="text-sm text-muted-foreground flex items-center gap-2 mt-1">
-                                    <Clock className="h-4 w-4 text-primary" />
-                                    {slot.time}
-                                  </div>
-                                </Label>
-                              </div>
-                              <div className="flex items-center gap-2">
-                                {!slot.available && (
-                                  <Badge variant="secondary" className="bg-destructive/10 text-destructive border-destructive/20">
-                                    Fully Booked
-                                  </Badge>
-                                )}
-                                {slot.available && selectedSlot === slot.id && (
-                                  <Badge className="bg-success text-success-foreground shadow-soft animate-scale-in flex items-center gap-1">
-                                    <CheckCircle2 className="h-3 w-3" />
-                                    Selected
-                                  </Badge>
-                                )}
-                                {slot.available && selectedSlot !== slot.id && (
-                                  <Badge variant="outline" className="border-success/30 text-success">
-                                    Available
-                                  </Badge>
-                                )}
-                              </div>
-                            </div>
-                          </Card>
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                      {availableSlots.length === 0 ? (
+                        <div className="col-span-2 text-center py-12 bg-secondary/20 rounded-2xl border border-dashed border-border">
+                          <Clock className="h-10 w-10 text-muted-foreground mx-auto mb-3 opacity-50" />
+                          <p className="text-muted-foreground font-medium">No available slots at the moment.</p>
                         </div>
-                      ))}
+                      ) : (
+                        availableSlots.map((slot, index) => (
+                          <div
+                            key={slot.id}
+                            className="relative group h-full"
+                          >
+                            <Label
+                              htmlFor={slot.id}
+                              className={`
+                                  relative flex flex-col p-5 rounded-2xl border-2 transition-all duration-300 cursor-pointer h-full
+                                  ${!slot.is_available ? 'opacity-50 cursor-not-allowed bg-secondary/20 border-transparent' : ''}
+                                  ${selectedSlot === slot.id
+                                  ? 'bg-primary/5 border-primary shadow-glow scale-[1.02]'
+                                  : 'bg-white/40 hover:bg-white/60 border-transparent hover:border-primary/30 hover:shadow-md'
+                                }
+                                `}
+                            >
+                              <div className="flex justify-between items-start mb-3">
+                                <RadioGroupItem value={slot.id} id={slot.id} disabled={!slot.is_available} className="mt-1" />
+
+                                {slot.is_available && selectedSlot === slot.id && (
+                                  <Badge className="bg-success text-white shadow-sm animate-scale-in">Selected</Badge>
+                                )}
+                                {!slot.is_available && (
+                                  <Badge variant="secondary">Booked</Badge>
+                                )}
+                              </div>
+
+                              <div className="mt-auto">
+                                <div className="font-bold text-lg text-foreground mb-1">{formatSlotDate(slot.start_time)}</div>
+                                <div className="flex items-center gap-2 text-sm text-muted-foreground font-medium bg-background/50 px-3 py-1.5 rounded-lg w-fit">
+                                  <Clock className="h-3.5 w-3.5" />
+                                  {formatSlotTime(slot.start_time, slot.end_time)}
+                                </div>
+                              </div>
+                            </Label>
+                          </div>
+                        ))
+                      )}
                     </div>
                   </RadioGroup>
-                </CardContent>
-              </Card>
+                </div>
 
-              {/* Features Section */}
-              <div className="grid grid-cols-3 gap-4">
-                {[
-                  { icon: Mail, label: "Instant Email", desc: "Confirmation" },
-                  { icon: Shield, label: "Secure", desc: "Payment" },
-                  { icon: Zap, label: "Quick", desc: "Access" },
-                ].map((feature, index) => (
-                  <Card 
-                    key={index} 
-                    className="p-4 text-center bg-card/50 backdrop-blur-sm border-border/50 hover:border-primary/30 transition-all duration-300 hover:shadow-medium group"
-                  >
-                    <div className="p-3 bg-primary/10 rounded-xl w-fit mx-auto mb-2 group-hover:bg-primary/20 transition-colors">
-                      <feature.icon className="h-5 w-5 text-primary" />
+                {/* Trust Badges */}
+                <div className="grid grid-cols-3 gap-6">
+                  {[
+                    { icon: Mail, label: "Instant Access", desc: "Confirmation via Email" },
+                    { icon: Shield, label: "Secure Payment", desc: "Encrypted & Safe" },
+                    { icon: Zap, label: "Fast Booking", desc: "Takes < 1 minute" },
+                  ].map((feature, index) => (
+                    <div key={index} className="text-center p-4 rounded-2xl bg-white/30 border border-white/20 shadow-sm hover:bg-white/50 transition-colors">
+                      <feature.icon className="h-6 w-6 text-primary mx-auto mb-2 opacity-80" />
+                      <div className="font-bold text-sm mb-0.5">{feature.label}</div>
+                      <div className="text-xs text-muted-foreground">{feature.desc}</div>
                     </div>
-                    <div className="font-semibold text-sm">{feature.label}</div>
-                    <div className="text-xs text-muted-foreground">{feature.desc}</div>
-                  </Card>
-                ))}
+                  ))}
+                </div>
               </div>
-            </div>
+            ) : (
+              <div className="lg:col-span-2 space-y-6">
+                <div className="glass-card rounded-3xl p-8 border-0 shadow-soft">
+                  <h2 className="text-2xl font-bold mb-6">Course Benefits</h2>
+                  <div className="space-y-4">
+                    <p className="text-muted-foreground leading-relaxed">By enrolling in this course, you get immediate lifetime access to all materials.</p>
 
-            {/* Booking Summary */}
-            <div className="lg:col-span-1">
-              <div className="sticky top-24">
-                <Card className="border-2 border-primary/20 bg-card/90 backdrop-blur-sm shadow-strong overflow-hidden">
-                  {/* Glow effect at top */}
-                  <div className="absolute top-0 left-0 right-0 h-32 bg-gradient-to-b from-primary/10 to-transparent pointer-events-none" />
-                  
-                  <CardHeader className="relative">
-                    <CardTitle className="flex items-center gap-2">
-                      <Sparkles className="h-5 w-5 text-primary" />
-                      Booking Summary
-                    </CardTitle>
-                  </CardHeader>
-                  <CardContent className="space-y-5 relative">
-                    <div className="p-4 bg-muted/30 rounded-xl border border-border/50">
-                      <div className="text-xs text-muted-foreground mb-1 uppercase tracking-wide">Course</div>
-                      <div className="font-semibold text-lg">{course.title}</div>
-                    </div>
-                    
-                    <div className="p-4 bg-muted/30 rounded-xl border border-border/50">
-                      <div className="text-xs text-muted-foreground mb-1 uppercase tracking-wide">Instructor</div>
-                      <div className="font-medium">{course.instructor}</div>
-                    </div>
-                    
-                    {selectedSlot && (
-                      <div className="p-4 bg-primary/5 rounded-xl border border-primary/20 animate-scale-in">
-                        <div className="text-xs text-primary mb-1 uppercase tracking-wide font-medium">Selected Slot</div>
-                        <div className="font-semibold">
-                          {availableSlots.find(s => s.id === selectedSlot)?.date}
-                        </div>
-                        <div className="text-sm text-muted-foreground flex items-center gap-1 mt-1">
-                          <Clock className="h-3 w-3" />
-                          {availableSlots.find(s => s.id === selectedSlot)?.time}
-                        </div>
-                      </div>
-                    )}
-                    
-                    <div className="pt-4 border-t border-border/50">
-                      <div className="flex justify-between items-center mb-6">
-                        <span className="font-medium text-muted-foreground">Total Amount</span>
-                        <div className="text-right">
-                          <span className="text-3xl font-bold bg-gradient-to-r from-primary to-accent bg-clip-text text-transparent">
-                            {course.price}
-                          </span>
-                        </div>
-                      </div>
-                      
-                      <Button 
-                        onClick={handleBooking}
-                        className="w-full relative overflow-hidden group" 
-                        size="lg" 
-                        variant="gradient"
-                        disabled={!selectedSlot || isBooking}
-                      >
-                        <div className="absolute inset-0 bg-gradient-to-r from-primary/0 via-white/20 to-primary/0 translate-x-[-100%] group-hover:translate-x-[100%] transition-transform duration-700" />
-                        <CreditCard className="mr-2 h-5 w-5" />
-                        {isBooking ? "Processing..." : "Proceed to Payment"}
-                      </Button>
-                    </div>
-                    
-                    <div className="space-y-2 pt-4">
+                    <div className="grid gap-4 mt-6">
                       {[
-                        "Instant email confirmation",
-                        "Session link sent after payment",
-                        "30-day money-back guarantee"
-                      ].map((text, i) => (
-                        <div key={i} className="flex items-center gap-2 text-sm text-muted-foreground">
-                          <CheckCircle2 className="h-4 w-4 text-success" />
-                          {text}
+                        "Lifetime Access to all videos and resources",
+                        "Certificate of Completion upon finishing",
+                        "Access to community discussion forums",
+                        "Downloadable source code and project files"
+                      ].map((benefit, i) => (
+                        <div key={i} className="flex items-center gap-3 p-4 bg-secondary/10 rounded-xl border border-secondary/20">
+                          <div className="h-6 w-6 rounded-full bg-success/20 flex items-center justify-center shrink-0">
+                            <CheckCircle2 className="h-3.5 w-3.5 text-success" />
+                          </div>
+                          <span className="font-medium text-foreground/90">{benefit}</span>
                         </div>
                       ))}
                     </div>
-                  </CardContent>
-                </Card>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* Booking Summary - Floating */}
+            <div className="lg:col-span-1 animate-slide-in-right" style={{ animationDelay: '0.3s' }}>
+              <div className="sticky top-28">
+                <div className="glass-card rounded-3xl p-6 border border-white/40 shadow-strong relative overflow-hidden backdrop-blur-xl bg-white/40 dark:bg-black/40">
+                  {/* Decorative */}
+                  <div className="absolute -top-10 -right-10 w-32 h-32 bg-primary/20 rounded-full blur-3xl opacity-50" />
+
+                  <div className="relative">
+                    <h3 className="text-xl font-black mb-6 flex items-center gap-2">
+                      <CreditCard className="h-5 w-5 text-primary" />
+                      Order Summary
+                    </h3>
+
+                    <div className="space-y-4 mb-8">
+                      <div className="flex justify-between items-start pb-4 border-b border-dashed border-foreground/10">
+                        <span className="text-muted-foreground font-medium">Course</span>
+                        <span className="font-bold text-right max-w-[60%]">{course.title}</span>
+                      </div>
+
+                      <div className="flex justify-between items-center pb-4 border-b border-dashed border-foreground/10">
+                        <span className="text-muted-foreground font-medium">Instructor</span>
+                        <span className="font-medium">{course.instructor}</span>
+                      </div>
+
+                      {selectedSlot && course.booking_type === 'slot_based' && (
+                        <div className="flex justify-between items-center pb-4 border-b border-dashed border-foreground/10 bg-primary/5 -mx-6 px-6 py-3">
+                          <span className="text-primary font-medium">Selected Slot</span>
+                          <div className="text-right">
+                            <div className="font-bold text-primary text-sm">{availableSlots.find(s => s.id === selectedSlot) ? formatSlotDate(availableSlots.find(s => s.id === selectedSlot)!.start_time) : ''}</div>
+                            <div className="text-xs text-primary/80">{availableSlots.find(s => s.id === selectedSlot) ? formatSlotTime(availableSlots.find(s => s.id === selectedSlot)!.start_time, availableSlots.find(s => s.id === selectedSlot)!.end_time) : ''}</div>
+                          </div>
+                        </div>
+                      )}
+
+                      <div className="flex justify-between items-center pt-2">
+                        <span className="text-lg font-bold">Total</span>
+                        <span className="text-3xl font-black bg-gradient-primary bg-clip-text text-transparent">₹{course.price}</span>
+                      </div>
+                    </div>
+
+                    <Button
+                      onClick={handleBooking}
+                      className="w-full h-14 rounded-xl text-lg font-bold shadow-medium hover:shadow-glow hover:-translate-y-1 transition-all duration-300"
+                      variant="gradient"
+                      disabled={(course.booking_type === 'slot_based' && !selectedSlot) || isBooking}
+                    >
+                      {isBooking ? (
+                        <div className="flex items-center gap-2">
+                          <Loader2 className="h-5 w-5 animate-spin" /> Processing...
+                        </div>
+                      ) : "Proceed to Payment"}
+                    </Button>
+
+                    <div className="mt-6 text-center">
+                      <p className="text-xs text-muted-foreground flex items-center justify-center gap-1.5 opacity-80">
+                        <Shield className="h-3 w-3" /> Secure SSL Encrypted Transaction
+                      </p>
+                    </div>
+                  </div>
+                </div>
               </div>
             </div>
           </div>

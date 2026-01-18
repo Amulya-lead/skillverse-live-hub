@@ -18,17 +18,41 @@ const Auth = () => {
 
   useEffect(() => {
     // Check if user is already logged in
-    supabase.auth.getSession().then(({ data: { session } }) => {
+    const checkSession = async () => {
+      const { data: { session } } = await supabase.auth.getSession();
       if (session) {
-        navigate("/courses");
+        // We will let the handleRedirect logic handle where to go, 
+        // but for now, if already logged in, we might just want to check role and redirect.
+        // Or simply let them be if they are on /auth it might be better to redirect.
+        handleRoleRedirect(session.user.id);
       }
-    });
+    };
+    checkSession();
   }, [navigate]);
+
+  const handleRoleRedirect = async (userId: string) => {
+    try {
+      const { data: profile } = await supabase
+        .from('profiles')
+        .select('role')
+        .eq('id', userId)
+        .single() as { data: any };
+
+      const role = profile?.role || 'student';
+
+      if (role === 'admin') navigate('/admin/dashboard');
+      else if (role === 'instructor') navigate('/instructor');
+      else navigate('/dashboard');
+    } catch (e) {
+      console.error("Error fetching role:", e);
+      navigate('/dashboard');
+    }
+  };
 
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
     setIsLoading(true);
-    
+
     try {
       const { data, error } = await supabase.auth.signInWithPassword({
         email,
@@ -41,8 +65,12 @@ const Auth = () => {
         title: "Login Successful! 🎉",
         description: "Welcome back to SkillVerse!",
       });
-      
-      navigate("/courses");
+
+      if (data.user) {
+        await handleRoleRedirect(data.user.id);
+      } else {
+        navigate("/dashboard");
+      }
     } catch (error: any) {
       toast({
         title: "Login Failed",
@@ -57,13 +85,13 @@ const Auth = () => {
   const handleSignup = async (e: React.FormEvent) => {
     e.preventDefault();
     setIsLoading(true);
-    
+
     try {
       const { data, error } = await supabase.auth.signUp({
         email,
         password,
         options: {
-          emailRedirectTo: `${window.location.origin}/`,
+          emailRedirectTo: `${window.location.origin}/auth`,
           data: {
             full_name: fullName,
           }
@@ -76,8 +104,15 @@ const Auth = () => {
         title: "Signup Successful! 🎉",
         description: "Your account has been created. Welcome to SkillVerse!",
       });
-      
-      navigate("/courses");
+
+      if (data.user) {
+        // Ensure profile is created before redirecting if trigger is slow?
+        // The trigger is usually fast, but we can wait a moment or just redirect.
+        // For now, let's assume trigger handles it or we handle it in context.
+        await handleRoleRedirect(data.user.id);
+      } else {
+        navigate("/dashboard");
+      }
     } catch (error: any) {
       toast({
         title: "Signup Failed",
@@ -90,51 +125,70 @@ const Auth = () => {
   };
 
   return (
-    <div className="min-h-screen bg-gradient-hero flex items-center justify-center p-4 relative overflow-hidden">
-      {/* Decorative elements */}
-      <div className="absolute top-20 right-10 w-72 h-72 bg-primary/5 rounded-full blur-3xl animate-float" />
-      <div className="absolute bottom-20 left-10 w-96 h-96 bg-accent/5 rounded-full blur-3xl animate-float" style={{ animationDelay: '2s' }} />
-      
+    <div className="min-h-screen relative overflow-hidden flex items-center justify-center p-4 bg-background">
+      {/* Premium Background Elements */}
+      <div className="absolute inset-0 bg-gradient-hero -z-10" />
+      <div className="absolute top-0 right-0 w-[600px] h-[600px] bg-primary/10 rounded-full blur-[120px] animate-pulse opacity-60" />
+      <div className="absolute bottom-0 left-0 w-[600px] h-[600px] bg-accent/5 rounded-full blur-[120px] animate-pulse opacity-60" style={{ animationDelay: '2s' }} />
+
+      {/* Animated Particles/Orbs */}
+      <div className="absolute top-20 right-[20%] w-4 h-4 bg-primary rounded-full animate-float blur-[1px]" />
+      <div className="absolute bottom-40 left-[15%] w-6 h-6 bg-accent rounded-full animate-float blur-[1px]" style={{ animationDelay: '1.5s' }} />
+      <div className="absolute top-1/2 left-[10%] w-3 h-3 bg-indigo-400 rounded-full animate-float blur-[1px]" style={{ animationDelay: '0.5s' }} />
+
       <div className="w-full max-w-md relative z-10 animate-fade-in-up">
 
-        <div className="mb-8 text-center animate-scale-in" style={{ animationDelay: '0.1s' }}>
-          <div className="w-16 h-16 bg-gradient-primary rounded-2xl flex items-center justify-center mx-auto mb-4 shadow-strong hover:shadow-glow transition-all duration-300 hover:scale-110">
-            <span className="text-primary-foreground font-bold text-2xl">F</span>
+        <div className="mb-10 text-center animate-scale-in" style={{ animationDelay: '0.1s' }}>
+          <div className="w-20 h-20 bg-gradient-primary rounded-3xl flex items-center justify-center mx-auto mb-6 shadow-glow rotate-3 hover:rotate-6 transition-transform duration-500">
+            <span className="text-white font-black text-4xl tracking-tighter drop-shadow-sm">S</span>
           </div>
-          <h1 className="text-2xl font-bold mb-2">Welcome to <span className="bg-gradient-primary bg-clip-text text-transparent">FOCSERA SkillVerse</span></h1>
-          <p className="text-muted-foreground">Sign in to access your learning dashboard</p>
+          <h1 className="text-4xl font-black mb-3 tracking-tight">Welcome to <span className="bg-clip-text text-transparent bg-gradient-primary">SkillVerse</span></h1>
+          <p className="text-lg text-muted-foreground font-light">Your gateway to interactive live learning.</p>
         </div>
 
-        <Card className="shadow-strong border-2 hover:border-primary/20 transition-all duration-300 animate-slide-in-left" style={{ animationDelay: '0.2s' }}>
-          <CardHeader>
-            <CardTitle>Get Started</CardTitle>
-            <CardDescription>
+        <Card className="glass-card border-white/20 shadow-strong overflow-hidden relative">
+          <div className="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-primary via-accent to-primary opacity-80" />
+
+          <CardHeader className="pb-2 text-center">
+            <CardTitle className="text-2xl font-bold">Get Started</CardTitle>
+            <CardDescription className="text-base">
               Create an account or sign in to continue
             </CardDescription>
           </CardHeader>
-          <CardContent>
-            <Tabs defaultValue="login">
-              <TabsList className="grid w-full grid-cols-2">
-                <TabsTrigger value="login" className="data-[state=active]:bg-gradient-primary data-[state=active]:text-primary-foreground">Login</TabsTrigger>
-                <TabsTrigger value="signup" className="data-[state=active]:bg-gradient-primary data-[state=active]:text-primary-foreground">Sign Up</TabsTrigger>
+
+          <CardContent className="pt-6">
+            <Tabs defaultValue="login" className="w-full">
+              <TabsList className="grid w-full grid-cols-2 mb-8 bg-black/5 dark:bg-white/5 p-1 rounded-xl">
+                <TabsTrigger
+                  value="login"
+                  className="rounded-lg font-medium text-base data-[state=active]:bg-white data-[state=active]:text-primary data-[state=active]:shadow-sm transition-all duration-300"
+                >
+                  Login
+                </TabsTrigger>
+                <TabsTrigger
+                  value="signup"
+                  className="rounded-lg font-medium text-base data-[state=active]:bg-white data-[state=active]:text-primary data-[state=active]:shadow-sm transition-all duration-300"
+                >
+                  Sign Up
+                </TabsTrigger>
               </TabsList>
 
-              <TabsContent value="login" className="animate-fade-in">
-                <form onSubmit={handleLogin} className="space-y-4">
+              <TabsContent value="login" className="animate-fade-in focus-visible:ring-0">
+                <form onSubmit={handleLogin} className="space-y-5">
                   <div className="space-y-2">
-                    <Label htmlFor="login-email">Email</Label>
+                    <Label htmlFor="login-email" className="text-sm font-semibold pl-1">Email Address</Label>
                     <Input
                       id="login-email"
                       type="email"
-                      placeholder="you@example.com"
+                      placeholder="name@example.com"
                       value={email}
                       onChange={(e) => setEmail(e.target.value)}
                       required
-                      className="border-2 focus:border-primary transition-all duration-300"
+                      className="h-12 rounded-xl bg-white/50 border-white/20 focus:bg-white focus:ring-2 ring-primary/20 transition-all duration-300 backdrop-blur-sm"
                     />
                   </div>
                   <div className="space-y-2">
-                    <Label htmlFor="login-password">Password</Label>
+                    <Label htmlFor="login-password" className="text-sm font-semibold pl-1">Password</Label>
                     <Input
                       id="login-password"
                       type="password"
@@ -142,24 +196,29 @@ const Auth = () => {
                       value={password}
                       onChange={(e) => setPassword(e.target.value)}
                       required
-                      className="border-2 focus:border-primary transition-all duration-300"
+                      className="h-12 rounded-xl bg-white/50 border-white/20 focus:bg-white focus:ring-2 ring-primary/20 transition-all duration-300 backdrop-blur-sm"
                     />
                   </div>
                   <Button
                     type="submit"
-                    className="w-full"
+                    className="w-full h-12 text-lg font-bold rounded-xl shadow-medium hover:shadow-glow hover:-translate-y-0.5 transition-all duration-300 mt-2"
                     variant="gradient"
                     disabled={isLoading}
                   >
-                    {isLoading ? "Signing in..." : "Sign In"}
+                    {isLoading ? (
+                      <div className="flex items-center gap-2">
+                        <div className="h-4 w-4 rounded-full border-2 border-white/30 border-t-white animate-spin" />
+                        Signing in...
+                      </div>
+                    ) : "Sign In"}
                   </Button>
                 </form>
               </TabsContent>
 
-              <TabsContent value="signup" className="animate-fade-in">
-                <form onSubmit={handleSignup} className="space-y-4">
+              <TabsContent value="signup" className="animate-fade-in focus-visible:ring-0">
+                <form onSubmit={handleSignup} className="space-y-5">
                   <div className="space-y-2">
-                    <Label htmlFor="signup-name">Full Name</Label>
+                    <Label htmlFor="signup-name" className="text-sm font-semibold pl-1">Full Name</Label>
                     <Input
                       id="signup-name"
                       type="text"
@@ -167,23 +226,23 @@ const Auth = () => {
                       value={fullName}
                       onChange={(e) => setFullName(e.target.value)}
                       required
-                      className="border-2 focus:border-primary transition-all duration-300"
+                      className="h-12 rounded-xl bg-white/50 border-white/20 focus:bg-white focus:ring-2 ring-primary/20 transition-all duration-300 backdrop-blur-sm"
                     />
                   </div>
                   <div className="space-y-2">
-                    <Label htmlFor="signup-email">Email</Label>
+                    <Label htmlFor="signup-email" className="text-sm font-semibold pl-1">Email Address</Label>
                     <Input
                       id="signup-email"
                       type="email"
-                      placeholder="you@example.com"
+                      placeholder="name@example.com"
                       value={email}
                       onChange={(e) => setEmail(e.target.value)}
                       required
-                      className="border-2 focus:border-primary transition-all duration-300"
+                      className="h-12 rounded-xl bg-white/50 border-white/20 focus:bg-white focus:ring-2 ring-primary/20 transition-all duration-300 backdrop-blur-sm"
                     />
                   </div>
                   <div className="space-y-2">
-                    <Label htmlFor="signup-password">Password</Label>
+                    <Label htmlFor="signup-password" className="text-sm font-semibold pl-1">Password</Label>
                     <Input
                       id="signup-password"
                       type="password"
@@ -192,16 +251,21 @@ const Auth = () => {
                       onChange={(e) => setPassword(e.target.value)}
                       required
                       minLength={6}
-                      className="border-2 focus:border-primary transition-all duration-300"
+                      className="h-12 rounded-xl bg-white/50 border-white/20 focus:bg-white focus:ring-2 ring-primary/20 transition-all duration-300 backdrop-blur-sm"
                     />
                   </div>
                   <Button
                     type="submit"
-                    className="w-full"
+                    className="w-full h-12 text-lg font-bold rounded-xl shadow-medium hover:shadow-glow hover:-translate-y-0.5 transition-all duration-300 mt-2"
                     variant="gradient"
                     disabled={isLoading}
                   >
-                    {isLoading ? "Creating account..." : "Create Account"}
+                    {isLoading ? (
+                      <div className="flex items-center gap-2">
+                        <div className="h-4 w-4 rounded-full border-2 border-white/30 border-t-white animate-spin" />
+                        Creating account...
+                      </div>
+                    ) : "Create Account"}
                   </Button>
                 </form>
               </TabsContent>
