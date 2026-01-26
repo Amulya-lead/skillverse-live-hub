@@ -9,6 +9,7 @@ import { Label } from "@/components/ui/label";
 import { useToast } from "@/hooks/use-toast";
 import { supabase } from "@/integrations/supabase/client";
 import { format } from "date-fns";
+import { MockPaymentModal } from "@/components/MockPaymentModal";
 
 declare global {
   interface Window {
@@ -42,6 +43,7 @@ const BookSession = () => {
   const [userName, setUserName] = useState("");
   const [userId, setUserId] = useState("");
   const [razorpayLoaded, setRazorpayLoaded] = useState(false);
+  const [showPaymentModal, setShowPaymentModal] = useState(false);
 
   const [course, setCourse] = useState<CourseData | null>(null);
   const [availableSlots, setAvailableSlots] = useState<SlotData[]>([]);
@@ -135,139 +137,56 @@ const BookSession = () => {
       return;
     }
 
-    setIsBooking(true);
     const selectedSlotData = availableSlots.find(s => s.id === selectedSlot);
 
     if (course.booking_type === 'slot_based' && !selectedSlotData) {
-      setIsBooking(false);
       return;
     }
 
-    const processBooking = async () => {
-      try {
-        let error;
+    // Instead of Razorpay, open Mock Modal
+    setShowPaymentModal(true);
+  };
 
-        if (course.booking_type === 'slot_based') {
-          // Call the secure RPC function to handle session creation and joining for slots
-          const { error: bookingError } = await supabase.rpc('book_course_slot', {
-            p_course_id: course.id,
-            p_user_id: userId,
-            p_start_time: selectedSlotData?.start_time,
-            p_end_time: selectedSlotData?.end_time
-          });
-          error = bookingError;
-        } else {
-          // Standard/Recorded course - just enroll
-          const { error: enrollError } = await supabase.rpc('enroll_course', {
-            p_course_id: course.id,
-            p_user_id: userId
-          });
-          error = enrollError;
-        }
+  const onPaymentSuccess = async () => {
+    setShowPaymentModal(false);
+    setIsBooking(true);
 
-        if (error) throw error;
-
-        await sendConfirmationEmail(selectedSlotData);
-        toast({
-          title: "Booking Confirmed! 🎉",
-          description: course.booking_type === 'slot_based' ? "Session booked successfully! Check your dashboard." : "Course Enrolled! Check My Courses.",
-        });
-        setTimeout(() => navigate("/dashboard?tab=" + (course.booking_type === 'slot_based' ? 'sessions' : 'courses')), 2000);
-
-      } catch (error: any) {
-        console.error("Error processing booking:", error);
-        toast({
-          title: "Booking Error",
-          description: "There was an issue processing your booking. Please try again.",
-          variant: "destructive",
-        });
-      } finally {
-        setIsBooking(false);
-      }
-    };
+    const selectedSlotData = availableSlots.find(s => s.id === selectedSlot);
 
     try {
-      // Create Razorpay order
-      const { data: orderData, error: orderError } = await supabase.functions.invoke("create-razorpay-order", {
-        body: {
-          amount: course.price,
-          currency: "INR",
-          courseId: course.id,
-          courseName: course.title,
-          userId: userId,
-          userEmail: userEmail,
-          sessionDate: selectedSlotData ? formatSlotDate(selectedSlotData.start_time) : "Standard Course",
-          sessionTime: selectedSlotData ? formatSlotTime(selectedSlotData.start_time, selectedSlotData.end_time) : "Lifetime Access",
-        },
-      });
-
-      if (orderError || !orderData?.configured) {
-        console.log("Razorpay not configured, proceeding with direct booking");
-        await processBooking();
-        return;
-      }
-
-      // Open Razorpay checkout
-      const options = {
-        key: orderData.keyId,
-        amount: orderData.amount,
-        currency: orderData.currency,
-        name: "SkillVerse",
-        description: course.title,
-        order_id: orderData.orderId,
-        handler: async function (response: any) {
-          // Verify payment
-          const { data: verifyData, error: verifyError } = await supabase.functions.invoke("verify-razorpay-payment", {
-            body: {
-              razorpay_order_id: response.razorpay_order_id,
-              razorpay_payment_id: response.razorpay_payment_id,
-              razorpay_signature: response.razorpay_signature,
-              courseId: course.id,
-              userId: userId,
-              sessionDate: selectedSlotData ? formatSlotDate(selectedSlotData.start_time) : "Standard Course",
-              sessionTime: selectedSlotData ? formatSlotTime(selectedSlotData.start_time, selectedSlotData.end_time) : "Lifetime Access",
-            },
-          });
-
-          if (verifyError || !verifyData?.verified) {
-            toast({
-              title: "Payment Verification Failed",
-              description: "Please contact support if amount was deducted.",
-              variant: "destructive",
-            });
-            setIsBooking(false);
-            return;
-          }
-
-          await processBooking();
-        },
-        prefill: {
-          name: userName,
-          email: userEmail,
-        },
-        theme: {
-          color: "#8b5cf6",
-        },
-        modal: {
-          ondismiss: function () {
-            setIsBooking(false);
-          }
-        }
-      };
-
-      if (window.Razorpay) {
-        const rzp = new window.Razorpay(options);
-        rzp.open();
+      let error;
+      if (course?.booking_type === 'slot_based') {
+        const { error: bookingError } = await supabase.rpc('book_course_slot', {
+          p_course_id: course.id,
+          p_user_id: userId,
+          p_start_time: selectedSlotData?.start_time,
+          p_end_time: selectedSlotData?.end_time
+        });
+        error = bookingError;
       } else {
-        throw new Error("Razorpay not loaded");
+        const { error: enrollError } = await supabase.rpc('enroll_course', {
+          p_course_id: course?.id,
+          p_user_id: userId
+        });
+        error = enrollError;
       }
-    } catch (error) {
-      console.error("Booking error:", error);
+
+      if (error) throw error;
+
       toast({
-        title: "Error",
-        description: "Something went wrong. Please try again.",
+        title: "Booking Confirmed! 🎉",
+        description: course?.booking_type === 'slot_based' ? "Session booked successfully! Check your dashboard." : "Course Enrolled! Check My Courses.",
+      });
+      setTimeout(() => navigate("/dashboard?tab=" + (course?.booking_type === 'slot_based' ? 'sessions' : 'courses')), 2000);
+
+    } catch (error: any) {
+      console.error("Error processing booking:", error);
+      toast({
+        title: "Booking Error",
+        description: error.message || "There was an issue processing your booking.",
         variant: "destructive",
       });
+    } finally {
       setIsBooking(false);
     }
   };
@@ -543,6 +462,13 @@ const BookSession = () => {
           </div>
         </div>
       </div>
+      <MockPaymentModal
+        isOpen={showPaymentModal}
+        onClose={() => setShowPaymentModal(false)}
+        onSuccess={onPaymentSuccess}
+        amount={course?.price || 0}
+        title={course?.title || "Course"}
+      />
     </div>
   );
 };

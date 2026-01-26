@@ -7,6 +7,7 @@ import { Plus, BookOpen, Users, DollarSign, Loader2, LayoutDashboard, Video, Bar
 import { Link } from "react-router-dom";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
+import { LiveSessionManager } from "@/components/LiveSessionManager";
 
 interface Course {
     id: string;
@@ -101,11 +102,21 @@ const TeacherDashboard = () => {
         try {
             const { data, error } = await supabase
                 .from("courses")
-                .select("*")
+                .select(`
+                    *,
+                    enrollments (count)
+                `)
                 .eq("instructor_id", userId);
 
             if (error) throw error;
-            setCourses(data || []);
+
+            // Map the data to include strict types and calculations
+            const coursesWithStats = (data || []).map((course: any) => ({
+                ...course,
+                students_count: course.enrollments?.[0]?.count || 0
+            }));
+
+            setCourses(coursesWithStats);
         } catch (error: any) {
             toast({
                 title: "Error fetching courses",
@@ -248,9 +259,11 @@ const TeacherDashboard = () => {
                                             <DollarSign className="h-6 w-6" />
                                         </div>
                                         <div className="text-sm text-muted-foreground uppercase tracking-wider font-medium mb-1">Total Earnings</div>
-                                        <div className="text-3xl font-black">₹0</div>
+                                        <div className="text-3xl font-black">
+                                            ₹{courses.reduce((acc, curr) => acc + (curr.price * (curr.students_count || 0)), 0).toLocaleString()}
+                                        </div>
                                         <div className="text-xs text-success mt-2 flex items-center gap-1">
-                                            <span className="bg-success/20 px-1.5 rounded text-success">+0%</span> vs last month
+                                            <span className="bg-success/20 px-1.5 rounded text-success">100%</span> Commission Free
                                         </div>
                                     </div>
                                 </div>
@@ -272,8 +285,8 @@ const TeacherDashboard = () => {
                                             <Video className="h-6 w-6" />
                                         </div>
                                         <div className="text-sm text-muted-foreground uppercase tracking-wider font-medium mb-1">Live Sessions</div>
-                                        <div className="text-3xl font-black">0</div>
-                                        <div className="text-xs text-muted-foreground mt-2">Upcoming this week</div>
+                                        <div className="text-3xl font-black">{courses.filter(c => c.booking_type === 'slot_based').length}</div>
+                                        <div className="text-xs text-muted-foreground mt-2">Active Live Courses</div>
                                     </div>
                                 </div>
                             </div>
@@ -368,13 +381,10 @@ const TeacherDashboard = () => {
                         </div>
                     )}
 
-                    {/* LIVE SESSIONS TAB (Placeholder for now) */}
+                    {/* LIVE SESSIONS TAB */}
                     {activeTab === 'sessions' && (
-                        <div className="glass-card p-12 rounded-3xl text-center animate-fade-in border border-dashed border-white/10">
-                            <Video className="h-16 w-16 mx-auto text-muted-foreground mb-4 opacity-50" />
-                            <h2 className="text-2xl font-bold mb-2">Live Sessions Manager</h2>
-                            <p className="text-muted-foreground mb-8">Manage your upcoming slot-based sessions here. (Coming Soon)</p>
-                            <Button disabled>View Calendar</Button>
+                        <div className="animate-fade-in">
+                            <LiveSessionManager userId={profile?.id} />
                         </div>
                     )}
 

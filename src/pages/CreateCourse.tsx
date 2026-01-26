@@ -11,6 +11,7 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Switch } from "@/components/ui/switch";
 import { Label } from "@/components/ui/label";
+import { FileUpload } from "@/components/FileUpload";
 
 const STEPS = [
     { number: 1, title: "Basic Info", icon: BookOpen },
@@ -290,20 +291,21 @@ const CreateCourse = () => {
                         <div className="space-y-6 animate-slide-in-right">
                             <h2 className="text-2xl font-bold mb-6">Course Media</h2>
                             <div className="space-y-4">
-                                <Label>Cover Image URL</Label>
-                                <Input
-                                    placeholder="https://..."
-                                    className="bg-white/5 border-white/10"
-                                    value={formData.imageUrl}
-                                    onChange={e => setFormData({ ...formData, imageUrl: e.target.value })}
+                                <Label>Cover Image</Label>
+                                <FileUpload
+                                    onUpload={(url) => setFormData({ ...formData, imageUrl: url })}
+                                    defaultValue={formData.imageUrl}
+                                    accept="image/*"
+                                    folder="course-covers"
+                                    label="Upload Course Cover"
                                 />
-                                <div className="aspect-video rounded-xl bg-black/40 border border-white/10 flex items-center justify-center overflow-hidden relative group">
+                                <div className="aspect-video rounded-xl bg-black/40 border border-white/10 flex items-center justify-center overflow-hidden relative group mt-4">
                                     {formData.imageUrl ? (
                                         <img src={formData.imageUrl} alt="Preview" className="w-full h-full object-cover" />
                                     ) : (
                                         <div className="text-center text-muted-foreground p-8">
                                             <ImageIcon className="h-12 w-12 mx-auto mb-2 opacity-50" />
-                                            <p>Enter an image URL to see a preview</p>
+                                            <p>Upload an image to see a preview</p>
                                         </div>
                                     )}
                                 </div>
@@ -369,13 +371,16 @@ const CreateCourse = () => {
                                                             placeholder="Lesson Title"
                                                         />
                                                     </div>
-                                                    <div className="flex items-center gap-2">
-                                                        <Input
-                                                            value={item.content_url}
-                                                            onChange={(e) => updateItem(mIndex, iIndex, 'content_url', e.target.value)}
-                                                            className="h-8 bg-white/5 border-white/10 text-xs w-full sm:w-48"
-                                                            placeholder="Content URL (YouTube/PDF)"
-                                                        />
+                                                    <div className="flex items-center gap-2 flex-wrap">
+                                                        <div className="flex-1 min-w-[200px]">
+                                                            <FileUpload
+                                                                onUpload={(url) => updateItem(mIndex, iIndex, 'content_url', url)}
+                                                                defaultValue={item.content_url}
+                                                                accept={item.type === 'pdf' ? "application/pdf" : "video/*"}
+                                                                folder="lesson-content"
+                                                                label={item.type === 'pdf' ? "Upload PDF" : "Upload Video"}
+                                                            />
+                                                        </div>
                                                         <div className="flex items-center gap-1 bg-white/5 rounded px-2 h-8" title="Duration (mins)">
                                                             <span className="text-xs text-muted-foreground">min</span>
                                                             <Input
